@@ -1,177 +1,140 @@
-# Heretic: Fully automatic censorship removal for language models
+# Heretic on RunPod
 
-Heretic is a tool that removes censorship (aka "safety alignment") from
-transformer-based language models without expensive post-training.
-It combines an advanced implementation of directional ablation, also known
-as "abliteration" ([Arditi et al. 2024](https://arxiv.org/abs/2406.11717)),
-with a TPE-based parameter optimizer powered by [Optuna](https://optuna.org/).
+## Directory Structure
 
-This approach enables Heretic to work **completely automatically.** Heretic
-finds high-quality abliteration parameters by co-minimizing the number of
-refusals and the KL divergence from the original model. This results in a
-decensored model that retains as much of the original model's intelligence
-as possible. Using Heretic does not require an understanding of transformer
-internals. In fact, anyone who knows how to run a command-line program
-can use Heretic to decensor language models.
+```
+C:\Development\Projects\heretic\
+|-- README.md              - This file
+|-- runpod.ps1             - Windows automation
+|-- config.toml            - Experiment config
+|-- config.default.toml    - Reference config
+`-- src/                   - Source code
+```
 
-<img width="650" height="715" alt="Screenshot" src="https://github.com/user-attachments/assets/d71a5efa-d6be-4705-a817-63332afb2d15" />
+## RunPod Pod Configuration
 
-&nbsp;
+**Template**: PyTorch 2.x
+**GPU**: RTX 5090 (recommended) or RTX 4090
+**Volume**: 50GB+
+**Port**: TCP 22
 
-Running unsupervised with the default configuration, Heretic can produce
-decensored models that rival the quality of abliterations created manually
-by human experts:
+### GPU Options
 
-| Model | Refusals for "harmful" prompts | KL divergence from original model for "harmless" prompts |
-| :--- | ---: | ---: |
-| [google/gemma-3-12b-it](https://huggingface.co/google/gemma-3-12b-it) (original) | 97/100 | 0 *(by definition)* |
-| [mlabonne/gemma-3-12b-it-abliterated-v2](https://huggingface.co/mlabonne/gemma-3-12b-it-abliterated-v2) | 3/100 | 1.04 |
-| [huihui-ai/gemma-3-12b-it-abliterated](https://huggingface.co/huihui-ai/gemma-3-12b-it-abliterated) | 3/100 | 0.45 |
-| **[p-e-w/gemma-3-12b-it-heretic](https://huggingface.co/p-e-w/gemma-3-12b-it-heretic) (ours)** | **3/100** | **0.16** |
+| GPU | VRAM | Cost/hr | 8B Model Time |
+|-----|------|---------|---------------|
+| RTX 5090 | 32GB | $0.50-0.89 | ~17 min |
+| RTX 4090 | 24GB | $0.34 | ~30 min |
+| RTX 3090 | 24GB | $0.22-0.43 | ~45 min |
+| L40S | 48GB | $0.70-1.00 | ~23 min |
 
-The Heretic version, generated without any human effort, achieves the same
-level of refusal suppression as other abliterations, but at a much lower
-KL divergence, indicating less damage to the original model's capabilities.
-*(You can reproduce those numbers using Heretic's built-in evaluation functionality,
-e.g. `heretic --model google/gemma-3-12b-it --evaluate-model p-e-w/gemma-3-12b-it-heretic`.
-Note that the exact values might be platform- and hardware-dependent.
-The table above was compiled using PyTorch 2.8 on an RTX 5090.)*
+## Setup
 
-Heretic supports most dense models, including many multimodal models, and
-several different MoE architectures. It does not yet support SSMs/hybrid models,
-models with inhomogeneous layers, and certain novel attention systems.
+Edit `runpod.ps1`:
+```powershell
+$RUNPOD_HOST = "abc123xyz.runpod.io"  # Your pod hostname
+$RUNPOD_PORT = "12345"                 # Your SSH port
+```
 
-You can find a collection of models that have been decensored using Heretic
-[on Hugging Face](https://huggingface.co/collections/p-e-w/the-bestiary).
-
+Initialize:
+```powershell
+cd C:\Development\Projects\heretic
+.\runpod.ps1 setup
+```
 
 ## Usage
 
-Prepare a Python 3.10+ environment with PyTorch 2.2+ installed as appropriate
-for your hardware. Then run:
-
+### Test Installation
+```powershell
+.\runpod.ps1 test
 ```
-pip install heretic-llm
-heretic Qwen/Qwen3-4B-Instruct-2507
+Runs Qwen3-4B. Time: 10-15 min (RTX 5090), 20 min (RTX 4090), 30 min (RTX 3090)
+
+### Process Model
+```powershell
+.\runpod.ps1 run meta-llama/Llama-3.1-8B-Instruct
 ```
+Time: 17 min (RTX 5090), 30 min (RTX 4090), 45 min (RTX 3090)
 
-Replace `Qwen/Qwen3-4B-Instruct-2507` with whatever model you want to decensor.
-
-The process is fully automatic and does not require configuration; however,
-Heretic has a variety of configuration parameters that can be changed for
-greater control. Run `heretic --help` to see available command-line options,
-or look at [`config.default.toml`](config.default.toml) if you prefer to use
-a configuration file.
-
-At the start of a program run, Heretic benchmarks the system to determine
-the optimal batch size to make the most of the available hardware.
-On an RTX 3090, with the default configuration, decensoring Llama-3.1-8B
-takes about 45 minutes.
-
-After Heretic has finished decensoring a model, you are given the option to
-save the model, upload it to Hugging Face, chat with it to test how well it works,
-or any combination of those actions.
-
-
-## How it works
-
-Heretic implements a parametrized variant of directional ablation. For each
-supported transformer component (currently, attention out-projection and
-MLP down-projection), it identifies the associated matrices in each transformer
-layer, and orthogonalizes them with respect to the relevant "refusal direction",
-inhibiting the expression of that direction in the result of multiplications
-with that matrix.
-
-Refusal directions are computed for each layer as a difference-of-means between
-the first-token residuals for "harmful" and "harmless" example prompts.
-
-The ablation process is controlled by several optimizable parameters:
-
-* `direction_index`: Either the index of a refusal direction, or the special
-  value `per layer`, indicating that each layer should be ablated using the
-  refusal direction associated with that layer.
-* `max_weight`, `max_weight_position`, `min_weight`, and `min_weight_distance`:
-  For each component, these parameters describe the shape and position of the
-  ablation weight kernel over the layers. The following diagram illustrates this:
-
-<img width="800" height="500" alt="Explanation" src="https://github.com/user-attachments/assets/82e4b84e-5a82-4faf-b918-ac642f9e4892" />
-
-&nbsp;
-
-Heretic's main innovations over existing abliteration systems are:
-
-* The shape of the ablation weight kernel is highly flexible, which, combined with
-  automatic parameter optimization, can improve the compliance/quality tradeoff.
-  Non-constant ablation weights were previously explored by Maxime Labonne in
-  [gemma-3-12b-it-abliterated-v2](https://huggingface.co/mlabonne/gemma-3-12b-it-abliterated-v2).
-* The refusal direction index is a float rather than an integer. For non-integral
-  values, the two nearest refusal direction vectors are linearly interpolated.
-  This unlocks a vast space of additional directions beyond the ones identified
-  by the difference-of-means computation, and often enables the optimization
-  process to find a better direction than that belonging to any individual layer.
-* Ablation parameters are chosen separately for each component. I have found that
-  MLP interventions tend to be more damaging to the model than attention interventions,
-  so using different ablation weights can squeeze out some extra performance.
-
-
-## Prior art
-
-I'm aware of the following publicly available implementations of abliteration
-techniques:
-
-* [AutoAbliteration](https://huggingface.co/posts/mlabonne/714992455492422)
-* [abliterator.py](https://github.com/FailSpy/abliterator)
-* [wassname's Abliterator](https://github.com/wassname/abliterator)
-* [ErisForge](https://github.com/Tsadoq/ErisForge)
-* [Removing refusals with HF Transformers](https://github.com/Sumandora/remove-refusals-with-transformers)
-* [deccp](https://github.com/AUGMXNT/deccp)
-
-Note that Heretic was written from scratch, and does not reuse code from
-any of those projects.
-
-
-## Acknowledgments
-
-The development of Heretic was informed by:
-
-* [The original abliteration paper (Arditi et al. 2024)](https://arxiv.org/abs/2406.11717)
-* [Maxime Labonne's article on abliteration](https://huggingface.co/blog/mlabonne/abliteration),
-  as well as some details from the model cards of his own abliterated models (see above)
-* [Jim Lai's article describing "projected abliteration"](https://huggingface.co/blog/grimjim/projected-abliteration)
-
-
-## Citation
-
-If you use Heretic for your research, please cite it using the following BibTeX entry:
-
-```bibtex
-@misc{heretic,
-  author = {Weidmann, Philipp Emanuel},
-  title = {Heretic: Fully automatic censorship removal for language models},
-  year = {2025},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/p-e-w/heretic}}
-}
+### GPU Monitoring
+```powershell
+.\runpod.ps1 monitor
 ```
 
+### SSH Connection
+```powershell
+.\runpod.ps1 connect
+```
 
-## License
+### File Operations
+```powershell
+.\runpod.ps1 upload <file>
+.\runpod.ps1 download <file>
+.\runpod.ps1 sync  # Upload config.toml
+```
 
-Copyright &copy; 2025  Philipp Emanuel Weidmann (<pew@worldwidemann.com>)
+## Model Examples
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+**Small (4-8B)**
+- `Qwen/Qwen3-4B-Instruct-2507` (10-15 min on RTX 5090)
+- `meta-llama/Llama-3.1-8B-Instruct` (17 min on RTX 5090)
+- `mistralai/Mistral-7B-Instruct-v0.3` (15 min on RTX 5090)
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
+**Medium (13B)**
+- `meta-llama/Llama-2-13b-chat-hf` (25 min on RTX 5090)
 
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+**Large (30B+)**
+Requires L40S (48GB) or A100 (80GB)
 
-**By contributing to this project, you agree to release your
-contributions under the same license.**
+## Configuration
+
+Edit `config.toml`:
+- `n_trials`: Optimization iterations (default 200)
+- `batch_size`: 0 for auto-detect
+- `max_batch_size`: 128 default, 256 for RTX 5090
+- `dtypes`: Model precision fallback order
+
+Sync changes:
+```powershell
+.\runpod.ps1 sync
+```
+
+## RTX 5090 Optimization
+
+```toml
+batch_size = 0          # Auto-detect
+max_batch_size = 256    # Increase from default 128
+dtypes = ["auto"]       # Uses bfloat16
+```
+
+## Troubleshooting
+
+**OOM errors**: Use smaller model, reduce batch_size, or try float16
+**Slow performance**: Check GPU utilization with `.\runpod.ps1 status`
+**Connection issues**: Verify pod is running, check firewall
+
+## Cost Comparison (8B Model)
+
+```
+RTX 5090: $0.89/hr x 0.28hr = $0.25 per run
+RTX 4090: $0.34/hr x 0.50hr = $0.17 per run
+RTX 3090: $0.43/hr x 0.75hr = $0.32 per run
+```
+
+## Post-Processing
+
+After abliteration:
+1. Save locally (RunPod volume)
+2. Upload to HuggingFace (requires token)
+3. Chat test (interactive)
+
+Download:
+```powershell
+.\runpod.ps1 download output/
+```
+
+## References
+
+- Project: https://github.com/p-e-w/heretic
+- Paper: https://arxiv.org/abs/2406.11717
+- Models: https://huggingface.co/collections/p-e-w/the-bestiary
+- RTX 5090 Benchmarks: https://www.runpod.io/blog/rtx-5090-llm-benchmarks
