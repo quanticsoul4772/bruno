@@ -1,140 +1,118 @@
-# Heretic on RunPod
+# Heretic - Automatic Censorship Removal for LLMs
 
-## Directory Structure
+Heretic is a tool for automatic censorship removal (abliteration) from language models using Optuna-based hyperparameter optimization.
 
+## Quick Start
+
+```bash
+# Install
+pip install heretic-llm
+
+# Run abliteration
+heretic Qwen/Qwen3-4B-Instruct-2507
 ```
-C:\Development\Projects\heretic\
-|-- README.md              - This file
-|-- runpod.ps1             - Windows automation
-|-- config.toml            - Experiment config
-|-- config.default.toml    - Reference config
-`-- src/                   - Source code
-```
 
-## RunPod Pod Configuration
+## RunPod Deployment (Recommended for GPU)
 
-**Template**: PyTorch 2.x
-**GPU**: RTX 5090 (recommended) or RTX 4090
-**Volume**: 50GB+
-**Port**: TCP 22
+For users without local GPU access, use our RunPod automation script:
 
-### GPU Options
-
-| GPU | VRAM | Cost/hr | 8B Model Time |
-|-----|------|---------|---------------|
-| RTX 5090 | 32GB | $0.50-0.89 | ~17 min |
-| RTX 4090 | 24GB | $0.34 | ~30 min |
-| RTX 3090 | 24GB | $0.22-0.43 | ~45 min |
-| L40S | 48GB | $0.70-1.00 | ~23 min |
-
-## Setup
-
-Edit `runpod.ps1`:
 ```powershell
-$RUNPOD_HOST = "abc123xyz.runpod.io"  # Your pod hostname
-$RUNPOD_PORT = "12345"                 # Your SSH port
+# Initial setup (one-time)
+.\runpod.ps1 install-runpodctl  # Download CLI tool
+.\runpod.ps1 check-tools        # Verify prerequisites
+
+# Run abliteration
+.\runpod.ps1 create-pod         # Create RTX 4090 pod (~$0.34/hr)
+.\runpod.ps1 setup              # Install heretic
+.\runpod.ps1 run Qwen/Qwen3-4B-Instruct-2507
+.\runpod.ps1 stop-pod           # Stop billing when done
 ```
 
-Initialize:
-```powershell
-cd C:\Development\Projects\heretic
-.\runpod.ps1 setup
+See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
+
+## Features
+
+- **Automatic optimization** - Uses Optuna for multi-objective hyperparameter tuning
+- **Pareto-optimal results** - Presents best trade-offs between capability preservation and censorship removal
+- **Multi-GPU support** - Scales across available GPUs
+- **HuggingFace integration** - Direct upload to your HF account
+
+## Requirements
+
+- Python >= 3.10
+- CUDA-capable GPU (16GB+ VRAM recommended)
+- Or use RunPod for cloud GPU access
+
+## Installation
+
+```bash
+# From PyPI
+pip install heretic-llm
+
+# From source
+git clone https://github.com/p-e-w/heretic
+cd heretic
+uv sync --all-extras --dev
+uv run heretic <model-name>
 ```
 
 ## Usage
 
-### Test Installation
-```powershell
-.\runpod.ps1 test
+```bash
+# Basic usage
+heretic <model-name>
+
+# With options
+heretic --model <model-name> --config config.toml
+
+# Examples
+heretic Qwen/Qwen3-4B-Instruct-2507
+heretic meta-llama/Llama-3.1-8B-Instruct
+heretic mistralai/Mistral-7B-Instruct-v0.3
 ```
-Runs Qwen3-4B. Time: 10-15 min (RTX 5090), 20 min (RTX 4090), 30 min (RTX 3090)
-
-### Process Model
-```powershell
-.\runpod.ps1 run meta-llama/Llama-3.1-8B-Instruct
-```
-Time: 17 min (RTX 5090), 30 min (RTX 4090), 45 min (RTX 3090)
-
-### GPU Monitoring
-```powershell
-.\runpod.ps1 monitor
-```
-
-### SSH Connection
-```powershell
-.\runpod.ps1 connect
-```
-
-### File Operations
-```powershell
-.\runpod.ps1 upload <file>
-.\runpod.ps1 download <file>
-.\runpod.ps1 sync  # Upload config.toml
-```
-
-## Model Examples
-
-**Small (4-8B)**
-- `Qwen/Qwen3-4B-Instruct-2507` (10-15 min on RTX 5090)
-- `meta-llama/Llama-3.1-8B-Instruct` (17 min on RTX 5090)
-- `mistralai/Mistral-7B-Instruct-v0.3` (15 min on RTX 5090)
-
-**Medium (13B)**
-- `meta-llama/Llama-2-13b-chat-hf` (25 min on RTX 5090)
-
-**Large (30B+)**
-Requires L40S (48GB) or A100 (80GB)
 
 ## Configuration
 
-Edit `config.toml`:
-- `n_trials`: Optimization iterations (default 200)
-- `batch_size`: 0 for auto-detect
-- `max_batch_size`: 128 default, 256 for RTX 5090
-- `dtypes`: Model precision fallback order
-
-Sync changes:
-```powershell
-.\runpod.ps1 sync
-```
-
-## RTX 5090 Optimization
+Copy `config.default.toml` to `config.toml` and customize:
 
 ```toml
-batch_size = 0          # Auto-detect
-max_batch_size = 256    # Increase from default 128
-dtypes = ["auto"]       # Uses bfloat16
+[model]
+dtype = "auto"          # float16, bfloat16, or auto
+batch_size = 0          # 0 = auto-detect
+
+[optimization]
+n_trials = 100          # Number of Optuna trials
+kl_threshold = 1.0      # Max acceptable KL divergence
 ```
 
-## Troubleshooting
+## How It Works
 
-**OOM errors**: Use smaller model, reduce batch_size, or try float16
-**Slow performance**: Check GPU utilization with `.\runpod.ps1 status`
-**Connection issues**: Verify pod is running, check firewall
+1. **Load model** - Loads the target model with automatic dtype selection
+2. **Extract refusal directions** - Computes per-layer activation patterns from harmful vs. benign prompts
+3. **Optimize ablation** - Uses Optuna to find optimal ablation parameters that minimize refusals while preserving model capabilities (measured by KL divergence)
+4. **Select result** - Presents Pareto-optimal trials for user selection
+5. **Export** - Save locally or upload to HuggingFace
 
-## Cost Comparison (8B Model)
+## Citation
 
-```
-RTX 5090: $0.89/hr x 0.28hr = $0.25 per run
-RTX 4090: $0.34/hr x 0.50hr = $0.17 per run
-RTX 3090: $0.43/hr x 0.75hr = $0.32 per run
-```
-
-## Post-Processing
-
-After abliteration:
-1. Save locally (RunPod volume)
-2. Upload to HuggingFace (requires token)
-3. Chat test (interactive)
-
-Download:
-```powershell
-.\runpod.ps1 download output/
+```bibtex
+@misc{arditi2024refusallanguagemodelsmediated,
+      title={Refusal in Language Models Is Mediated by a Single Direction}, 
+      author={Andy Arditi and Oscar Obeso and Aaquib Syed and Daniel Paleka and Nina Rimsky and Wes Gurnee and Neel Nanda},
+      year={2024},
+      eprint={2406.11717},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2406.11717}, 
+}
 ```
 
-## References
+## License
 
-- Project: https://github.com/p-e-w/heretic
-- Paper: https://arxiv.org/abs/2406.11717
-- Models: https://huggingface.co/collections/p-e-w/the-bestiary
-- RTX 5090 Benchmarks: https://www.runpod.io/blog/rtx-5090-llm-benchmarks
+AGPL-3.0-or-later
+
+## Resources
+
+- [Paper](https://arxiv.org/abs/2406.11717)
+- [Abliterated Models](https://huggingface.co/collections/p-e-w/the-bestiary)
+- [Documentation](knowledge.md)
