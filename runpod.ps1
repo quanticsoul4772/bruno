@@ -17,11 +17,26 @@ param(
     [string]$Arg2
 )
 
+# ===== LOAD .ENV FILE =====
+# Automatically load environment variables from .env file if it exists
+$envFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^([^#=]+)=(.*)$') {
+            $name = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            if ($value -and $value -ne 'your_api_key_here') {
+                [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+            }
+        }
+    }
+}
+
 # ===== CONFIGURE THESE =====
-# API key can be set via environment variable (recommended) or hardcoded here
-# To set environment variable: $env:RUNPOD_API_KEY = 'your-key-here'
-# Or permanently: [Environment]::SetEnvironmentVariable('RUNPOD_API_KEY', 'your-key', 'User')
+# API key loaded from: .env file > environment variable > empty
+# Create .env file: copy .env.example to .env and add your key
 $RUNPOD_API_KEY = if ($env:RUNPOD_API_KEY) { $env:RUNPOD_API_KEY } else { "" }
+$HF_TOKEN = if ($env:HF_TOKEN) { $env:HF_TOKEN } else { "" }
 $RUNPOD_HOST = "103.196.86.69"     # Auto-configured by create-pod, or set manually
 $RUNPOD_PORT = "19214"     # Auto-configured by create-pod, or set manually
 $RUNPOD_USER = "root"
@@ -30,7 +45,7 @@ $SSH_KEY = "$env:USERPROFILE\.ssh\id_ed25519"  # Your SSH key
 # RunPod SSH proxy (more reliable than direct TCP)
 $RUNPOD_SSH_PROXY = "hjnmjr0qk1af9j-64411a7d@ssh.runpod.io"  # Auto-updated by create-pod
 $USE_SSH_PROXY = $true  # Using RunPod proxy since direct TCP isn't working
-$HF_TOKEN = "" # Optional: Set HuggingFace token here or use hf-login command
+# HF_TOKEN is loaded from .env file above
 
 # runpodctl Configuration
 # runpodctl is used for pod management and getting SSH connection info

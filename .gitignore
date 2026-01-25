@@ -17,3 +17,9 @@ wheels/
 
 # Configuration files
 /config.toml
+
+# Environment files (contain secrets)
+.env
+
+# RunPod tools (downloaded separately)
+runpodctl.exe
