@@ -585,8 +585,8 @@ def create_ui() -> gr.Blocks:
         # Header
         gr.HTML("""
             <div class="chat-header">
-                <h1>Heretic Chat</h1>
-                <p>Uncensored AI - Powered by abliterated models</p>
+                <h1>Heretic</h1>
+                <p>Uncensored local AI</p>
             </div>
         """)
 
@@ -774,30 +774,70 @@ def main() -> None:
     else:
         logger.warning("CUDA not available, using CPU (will be slower)")
 
-    # Custom CSS for styling
+    # Custom CSS for clean minimal styling
     custom_css = """
     .gradio-container {
-        max-width: 900px !important;
+        max-width: 850px !important;
         margin: auto !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif !important;
     }
     .chat-header {
         text-align: center;
-        padding: 20px;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 10px;
-        margin-bottom: 20px;
+        padding: 24px 20px 16px 20px;
+        border-bottom: 1px solid #e5e5e5;
+        margin-bottom: 16px;
     }
     .chat-header h1 {
-        color: #e94560;
+        color: #171717;
         margin: 0;
-        font-size: 2.5em;
+        font-size: 1.75em;
+        font-weight: 600;
+        letter-spacing: -0.02em;
     }
     .chat-header p {
-        color: #a0a0a0;
-        margin: 10px 0 0 0;
+        color: #737373;
+        margin: 6px 0 0 0;
+        font-size: 0.9em;
+        font-weight: 400;
     }
     footer {
         display: none !important;
+    }
+    /* Chat container styling */
+    .chatbot {
+        border: 1px solid #e5e5e5 !important;
+        border-radius: 8px !important;
+    }
+    /* Message styling */
+    .message {
+        border-radius: 6px !important;
+    }
+    /* Input styling */
+    .input-container textarea {
+        border: 1px solid #d4d4d4 !important;
+        border-radius: 6px !important;
+    }
+    .input-container textarea:focus {
+        border-color: #a3a3a3 !important;
+        box-shadow: none !important;
+    }
+    /* Button styling */
+    .primary {
+        background: #171717 !important;
+        border: none !important;
+        border-radius: 6px !important;
+    }
+    .primary:hover {
+        background: #404040 !important;
+    }
+    /* Accordion styling */
+    .accordion {
+        border: 1px solid #e5e5e5 !important;
+        border-radius: 6px !important;
+    }
+    /* Remove extra borders and shadows */
+    .block {
+        box-shadow: none !important;
     }
     """
 
@@ -810,7 +850,7 @@ def main() -> None:
         share=False,  # Set to True to get a public URL
         inbrowser=True,
         css=custom_css,
-        theme=gr.themes.Soft(primary_hue="red", neutral_hue="slate"),
+        theme=gr.themes.Monochrome(),
     )
 
 
