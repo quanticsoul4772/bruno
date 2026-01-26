@@ -345,6 +345,47 @@ def run():
     print()
     print("[bold green]Optimization finished![/]")
     print()
+
+    # Auto-select mode: automatically pick best trial and save without prompts
+    if settings.auto_select:
+        if not best_trials:
+            print("[red]No Pareto-optimal trials found. Cannot auto-select.[/]")
+            return
+
+        # Select the best trial (first one = lowest refusals)
+        trial = best_trials[0]
+        print(
+            f"[cyan]Auto-selecting trial {trial.user_attrs['index']} "
+            f"(Refusals: {trial.user_attrs['refusals']}, "
+            f"KL divergence: {trial.user_attrs['kl_divergence']:.2f})[/]"
+        )
+
+        print()
+        print(f"Restoring model from trial [bold]{trial.user_attrs['index']}[/]...")
+        print("* Reloading model...")
+        model.reload_model()
+        print("* Abliterating...")
+        model.abliterate(
+            refusal_directions,
+            trial.user_attrs["direction_index"],
+            trial.user_attrs["parameters"],
+        )
+
+        # Determine save path
+        if settings.auto_select_path:
+            save_directory = settings.auto_select_path
+        else:
+            # Default to model name with -heretic suffix
+            model_name = Path(settings.model).name
+            save_directory = f"./{model_name}-heretic"
+
+        print(f"Saving model to [bold]{save_directory}[/]...")
+        model.model.save_pretrained(save_directory)
+        model.tokenizer.save_pretrained(save_directory)
+        print(f"[bold green]Model saved to {save_directory}[/]")
+        return
+
+    # Interactive mode
     print(
         (
             "The following trials resulted in Pareto optimal combinations of refusals and KL divergence. "

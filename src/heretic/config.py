@@ -28,6 +28,16 @@ class Settings(BaseSettings):
         description="If this model ID or path is set, then instead of abliterating the main model, evaluate this model relative to the main model.",
     )
 
+    auto_select: bool = Field(
+        default=False,
+        description="Automatically select the best trial (lowest refusals) and save without interactive prompts. Useful for automation.",
+    )
+
+    auto_select_path: str | None = Field(
+        default=None,
+        description="Path to save the model when using --auto-select. Defaults to './<model-name>-heretic'.",
+    )
+
     dtypes: list[str] = Field(
         default=[
             # In practice, "auto" almost always means bfloat16.
