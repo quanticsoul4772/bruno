@@ -939,8 +939,16 @@ def create_ui() -> gr.Blocks:
             if not history:
                 return
 
-            # Get the last user message
-            user_msg = history[-1]["content"]
+            # Get the last user message - handle both string and list content (Gradio 6 multimodal)
+            user_content = history[-1]["content"]
+            if isinstance(user_content, list):
+                # Extract text from multimodal content blocks
+                user_msg = " ".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in user_content
+                )
+            else:
+                user_msg = str(user_content) if user_content else ""
 
             # Add placeholder for assistant response
             history = history + [{"role": "assistant", "content": ""}]
