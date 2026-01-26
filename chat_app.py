@@ -355,41 +355,31 @@ class ModelManager:
         self._generation_error = None
 
         try:
-            # Apply chat template
-            prompt = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+            # Use tokenize=True directly for most reliable cross-model compatibility
+            # This avoids issues where some tokenizers return different types
+            input_ids = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
             )
 
-            # Handle case where tokenizer returns a list instead of string
-            skip_tokenization = False
-            if isinstance(prompt, list):
-                if prompt and isinstance(prompt[0], str):
-                    # List of strings - join them
-                    prompt = "".join(prompt)
+            # Ensure we have a proper tensor
+            if not isinstance(input_ids, torch.Tensor):
+                if isinstance(input_ids, list):
+                    if not input_ids:
+                        raise TokenizationError(Exception("Tokenizer returned empty list"))
+                    input_ids = torch.tensor([input_ids] if isinstance(input_ids[0], int) else input_ids)
                 else:
-                    # List of token IDs - use tokenize=True approach
-                    logger.debug("Tokenizer returned token IDs, using tokenize=True")
-                    input_ids = self.tokenizer.apply_chat_template(
-                        messages,
-                        tokenize=True,
-                        add_generation_prompt=True,
-                        return_tensors="pt",
-                    )
-                    if not isinstance(input_ids, torch.Tensor):
-                        input_ids = torch.tensor([input_ids])
-                    input_ids = input_ids.to(self.model.device)
-                    attention_mask = torch.ones_like(input_ids)
-                    skip_tokenization = True
+                    raise TokenizationError(Exception(f"Unexpected tokenizer output type: {type(input_ids)}"))
 
-            # Normal tokenization path (prompt is now a string)
-            if not skip_tokenization:
-                encoded = self.tokenizer(prompt, return_tensors="pt")
-                input_ids = encoded["input_ids"].to(self.model.device)
-                attention_mask = encoded.get("attention_mask")
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(self.model.device)
+            input_ids = input_ids.to(self.model.device)
+            attention_mask = torch.ones_like(input_ids)
 
+        except TokenizationError:
+            raise
         except Exception as e:
+            logger.error(f"Tokenization failed: {type(e).__name__}: {e}")
             raise TokenizationError(e) from e
 
         # Set up streamer
