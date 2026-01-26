@@ -77,6 +77,7 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 - **Multi-GPU support** - Scales across available GPUs
 - **HuggingFace integration** - Direct upload to your HF account
 - **Fully automated mode** - `--auto-select` + `--hf-upload` for headless operation
+- **Chat interface** - Gradio-based UI for interacting with abliterated models
 
 ## Requirements
 
@@ -155,6 +156,75 @@ kl_threshold = 1.0      # Max acceptable KL divergence
 3. **Optimize ablation** - Uses Optuna to find optimal ablation parameters that minimize refusals while preserving model capabilities (measured by KL divergence)
 4. **Select result** - Presents Pareto-optimal trials for user selection
 5. **Export** - Save locally or upload to HuggingFace
+
+## Chat Interface
+
+Heretic includes a sophisticated chat interface for interacting with your abliterated models.
+
+### Quick Start
+
+```bash
+# Install dependencies
+pip install gradio transformers torch accelerate
+
+# Run the chat app
+python chat_app.py
+```
+
+This opens a web UI at `http://localhost:7860` with:
+
+- **Model Selection** - Switch between abliterated models in the `models/` directory
+- **Streaming Responses** - See tokens appear in real-time
+- **Chat History** - Save and load conversations as JSON files
+- **Advanced Settings** - Adjustable temperature and max tokens
+
+### Using Your Models
+
+Place abliterated models in the `models/` directory:
+
+```
+models/
+  llama-3.2-3b-heretic/
+    config.json
+    model.safetensors
+    tokenizer.json
+    ...
+  qwen2.5-3b-heretic/
+    ...
+```
+
+Or download from HuggingFace:
+
+```python
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="rawcell/Llama-3.2-3B-Instruct-heretic",
+    local_dir="models/llama-3.2-3b-heretic"
+)
+```
+
+### Programmatic Usage
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Load from local path
+model = AutoModelForCausalLM.from_pretrained(
+    "models/llama-3.2-3b-heretic",
+    dtype=torch.float16,
+    device_map="auto"
+)
+tokenizer = AutoTokenizer.from_pretrained("models/llama-3.2-3b-heretic")
+
+# Generate response
+messages = [{"role": "user", "content": "Hello!"}]
+prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+outputs = model.generate(**inputs, max_new_tokens=512)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+```
 
 ## Citation
 

@@ -73,6 +73,16 @@ Key parameters in `config.toml`:
 - `max_batch_size`: Upper limit for auto-detection
 - `dtypes`: Fallback chain for model loading precision
 
+## Chat Interface
+
+**`chat_app.py`** - Gradio-based chat UI for abliterated models
+- Auto-discovers models in `models/` directory
+- Streaming token generation via `TextIteratorStreamer`
+- Chat history persistence to `chat_history/` as JSON
+- Model caching to avoid reloading between messages
+
+Run with: `python chat_app.py`
+
 ## Testing
 
 No test suite currently exists. CI runs formatting, linting, and build verification only.
