@@ -396,7 +396,9 @@ def run():
             try:
                 token = get_token()
                 if not token:
-                    print("[red]No HuggingFace token found. Set HF_TOKEN env var or run 'huggingface-cli login'[/]")
+                    print(
+                        "[red]No HuggingFace token found. Set HF_TOKEN env var or run 'huggingface-cli login'[/]"
+                    )
                 else:
                     model.model.push_to_hub(
                         settings.hf_upload,
@@ -416,7 +418,9 @@ def run():
                             card.data = ModelCardData()
                         if card.data.tags is None:
                             card.data.tags = []
-                        card.data.tags.extend(["heretic", "uncensored", "decensored", "abliterated"])
+                        card.data.tags.extend(
+                            ["heretic", "uncensored", "decensored", "abliterated"]
+                        )
                         card.text = (
                             get_readme_intro(
                                 settings,
