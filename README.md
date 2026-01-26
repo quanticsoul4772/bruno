@@ -175,8 +175,18 @@ This opens a web UI at `http://localhost:7860` with:
 
 - **Model Selection** - Switch between abliterated models in the `models/` directory
 - **Streaming Responses** - See tokens appear in real-time
+- **GPU Memory Monitoring** - Real-time display of GPU usage (e.g., "GPU: 4.2/8.0 GB (52%)")
 - **Chat History** - Save and load conversations as JSON files
 - **Advanced Settings** - Adjustable temperature and max tokens
+- **Model Validation** - Automatic validation of model files before loading
+- **Clean Minimal UI** - Monochrome theme with responsive design
+
+### Features
+
+- **Type-safe implementation** with comprehensive type hints
+- **Custom exception handling** for better error messages (CUDA OOM, model validation, etc.)
+- **Structured logging** with configurable log levels
+- **Cross-model compatibility** - Works with Llama, Qwen, and other architectures
 
 ### Using Your Models
 

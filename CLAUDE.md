@@ -76,10 +76,28 @@ Key parameters in `config.toml`:
 ## Chat Interface
 
 **`chat_app.py`** - Gradio-based chat UI for abliterated models
-- Auto-discovers models in `models/` directory
+
+### Architecture
+- `ModelManager` class: Handles model loading, caching, and streaming text generation
+- Custom exception hierarchy: `HereticError` base class with specific exceptions:
+  - `ModelNotFoundError`, `ModelValidationError`, `ModelLoadError`
+  - `CUDAOutOfMemoryError`, `TokenizationError`, `GenerationError`
+- Structured logging via Python's `logging` module (logger: `heretic_chat`)
+
+### Key Features
+- Auto-discovers models in `models/` directory with validation
+- Validates model files before loading (config.json, weights, tokenizer)
 - Streaming token generation via `TextIteratorStreamer`
+- Real-time GPU memory monitoring display
 - Chat history persistence to `chat_history/` as JSON
 - Model caching to avoid reloading between messages
+- Cross-model tokenization compatibility (handles Llama, Qwen, etc.)
+- Clean monochrome theme using Gradio CSS variables
+
+### Configuration
+- `MODELS_DIR`: Path to models directory (default: `./models`)
+- `CHAT_HISTORY_DIR`: Path to chat history (default: `./chat_history`)
+- Server runs on `0.0.0.0:7860` by default
 
 Run with: `python chat_app.py`
 
