@@ -352,6 +352,21 @@ class ModelManager:
         if self.model is None or self.tokenizer is None:
             raise GenerationError(Exception("No model loaded"))
 
+        # Validate messages - Qwen's chat template fails on None content
+        if not messages:
+            raise TokenizationError(Exception("No messages to process"))
+
+        # Ensure all message content is a string (Qwen's Jinja template fails on None)
+        validated_messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content")
+            # Convert None to empty string, ensure everything is str
+            if content is None:
+                content = ""
+            validated_messages.append({"role": str(role), "content": str(content)})
+        messages = validated_messages
+
         self._generation_error = None
 
         try:
