@@ -15,9 +15,32 @@ heretic Qwen/Qwen3-4B-Instruct-2507
 heretic Qwen/Qwen3-4B-Instruct-2507 --auto-select --hf-upload username/model-heretic
 ```
 
-## RunPod Deployment (Recommended for GPU)
+## Cloud GPU Deployment
 
-For users without local GPU access, use our RunPod automation script:
+For users without local GPU access, use our automation scripts or Docker image.
+
+### Option 1: Docker Image (Recommended)
+
+Pre-built Docker image works on RunPod, Vast.ai, and local GPU setups:
+
+```bash
+# Pull and run
+docker run --gpus all -it quanticsoul4772/heretic heretic Qwen/Qwen3-4B-Instruct-2507
+
+# With HuggingFace token for gated models
+docker run --gpus all -e HF_TOKEN=your_token -it quanticsoul4772/heretic \
+    heretic meta-llama/Llama-3.1-8B-Instruct --auto-select
+
+# With persistent cache
+docker run --gpus all -v heretic-cache:/workspace/.cache -it quanticsoul4772/heretic \
+    heretic Qwen/Qwen3-4B-Instruct-2507 --auto-select --hf-upload user/model-heretic
+```
+
+**On RunPod:** Use `quanticsoul4772/heretic` as your Docker image when creating a pod.
+
+**On Vast.ai:** Select `quanticsoul4772/heretic` as your Docker image when renting a GPU.
+
+### Option 2: RunPod Automation Script (Windows)
 
 ```powershell
 # Initial setup (one-time)
@@ -29,6 +52,19 @@ For users without local GPU access, use our RunPod automation script:
 .\runpod.ps1 setup              # Install heretic
 .\runpod.ps1 run Qwen/Qwen3-4B-Instruct-2507
 .\runpod.ps1 stop-pod           # Stop billing when done
+```
+
+### Option 3: Vast.ai (50% Cheaper)
+
+```powershell
+# Initial setup (one-time)
+.\runpod.ps1 install-vastcli    # Install Vast.ai CLI
+
+# Run abliteration (~$0.20/hr for RTX 4090)
+.\runpod.ps1 vast-create-pod    # Create instance
+.\runpod.ps1 vast-setup         # Install heretic
+.\runpod.ps1 vast-run Qwen/Qwen3-4B-Instruct-2507
+.\runpod.ps1 vast-stop          # Stop billing when done
 ```
 
 See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
@@ -46,7 +82,8 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 
 - Python >= 3.10
 - CUDA-capable GPU (16GB+ VRAM recommended)
-- Or use RunPod for cloud GPU access
+- Or use Docker with `--gpus all`
+- Or use RunPod/Vast.ai for cloud GPU access
 
 ## Installation
 
@@ -59,6 +96,10 @@ git clone https://github.com/p-e-w/heretic
 cd heretic
 uv sync --all-extras --dev
 uv run heretic <model-name>
+
+# Using Docker
+docker pull quanticsoul4772/heretic
+docker run --gpus all -it quanticsoul4772/heretic heretic --help
 ```
 
 ## Usage

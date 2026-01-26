@@ -1,0 +1,52 @@
+# Heretic Docker Compose
+# For local development and testing with GPU support
+#
+# Usage:
+#   docker compose run --rm heretic heretic <model>
+#   docker compose run --rm heretic heretic Qwen/Qwen3-4B-Instruct-2507 --auto-select
+
+services:
+  heretic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quanticsoul4772/heretic:latest
+    
+    # GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - HF_HOME=/workspace/.cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      # Uncomment and set your HuggingFace token:
+      # - HF_TOKEN=${HF_TOKEN}
+    
+    # Persistent volumes for cache and outputs
+    volumes:
+      - heretic-cache:/workspace/.cache
+      - heretic-models:/workspace/models
+      - heretic-outputs:/workspace/outputs
+    
+    # Interactive terminal
+    stdin_open: true
+    tty: true
+    
+    # Working directory
+    working_dir: /workspace
+
+# Named volumes for persistence
+volumes:
+  heretic-cache:
+    name: heretic-cache
+  heretic-models:
+    name: heretic-models
+  heretic-outputs:
+    name: heretic-outputs
