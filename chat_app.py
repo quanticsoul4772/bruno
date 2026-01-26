@@ -758,7 +758,7 @@ def create_ui() -> gr.Blocks:
         def update_status(model_name: str) -> str:
             """Update status when model changes."""
             if model_name and model_name in AVAILABLE_MODELS:
-                return f"Loading {model_name}..."
+                return f"Ready - {model_name}"
             return "No model selected"
 
         def on_model_loaded(model_name: str) -> tuple[str, str]:
@@ -829,18 +829,18 @@ def main() -> None:
     .chat-header {
         text-align: center;
         padding: 24px 20px 16px 20px;
-        border-bottom: 1px solid #e5e5e5;
+        border-bottom: 1px solid var(--border-color-primary, #e5e5e5);
         margin-bottom: 16px;
     }
     .chat-header h1 {
-        color: #171717;
+        color: var(--body-text-color, #171717);
         margin: 0;
         font-size: 1.75em;
         font-weight: 600;
         letter-spacing: -0.02em;
     }
     .chat-header p {
-        color: #737373;
+        color: var(--body-text-color-subdued, #737373);
         margin: 6px 0 0 0;
         font-size: 0.9em;
         font-weight: 400;
