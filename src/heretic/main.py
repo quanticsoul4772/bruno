@@ -24,8 +24,7 @@ from accelerate.utils import (
 )
 from huggingface_hub import ModelCard, ModelCardData, get_token
 from optuna import Trial
-from optuna.exceptions import ExperimentalWarning, TrialPruned
-from optuna.pruners import MedianPruner
+from optuna.exceptions import ExperimentalWarning
 from optuna.samplers import TPESampler
 from optuna.study import StudyDirection
 from pydantic import ValidationError
@@ -292,12 +291,10 @@ def run():
         print("* Evaluating...")
         score, kl_divergence, refusals = evaluator.get_score()
 
-        # Report intermediate value for pruning (use KL divergence as it's available earlier)
-        if settings.prune_trials:
-            trial.report(kl_divergence, step=0)
-            if trial.should_prune():
-                print(f"[yellow]Trial {trial_index} pruned (KL divergence: {kl_divergence:.2f})[/]")
-                raise TrialPruned()
+        # Note: trial.report() and trial.should_prune() are not supported for multi-objective
+        # optimization in Optuna. Pruning is disabled for now.
+        # TODO: Consider switching to single-objective optimization with weighted score
+        # if pruning is critical for performance.
 
         elapsed_time = time.perf_counter() - start_time
         remaining_time = (elapsed_time / trial_index) * (
@@ -315,13 +312,6 @@ def run():
 
         return score
 
-    # Configure pruner for early stopping of bad trials
-    pruner = MedianPruner(
-        n_startup_trials=settings.n_startup_trials,
-        n_warmup_steps=0,
-        interval_steps=1,
-    ) if settings.prune_trials else None
-
     study = optuna.create_study(
         sampler=TPESampler(
             n_startup_trials=settings.n_startup_trials,
@@ -329,7 +319,6 @@ def run():
             multivariate=True,
         ),
         directions=[StudyDirection.MINIMIZE, StudyDirection.MINIMIZE],
-        pruner=pruner,
     )
 
     study.optimize(objective, n_trials=settings.n_trials)

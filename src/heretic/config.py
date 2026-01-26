@@ -99,10 +99,8 @@ class Settings(BaseSettings):
         description="Number of trials that use random sampling for the purpose of exploration.",
     )
 
-    prune_trials: bool = Field(
-        default=True,
-        description="Enable pruning of unpromising trials using Optuna's MedianPruner. Note: Currently marks trials as pruned after evaluation (helps TPE sampler learn faster, but doesn't save computation time per trial).",
-    )
+    # Note: Pruning is not supported for multi-objective optimization in Optuna.
+    # The prune_trials option has been removed.
 
     refusal_markers: list[str] = Field(
         default=[
