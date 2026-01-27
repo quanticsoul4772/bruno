@@ -68,13 +68,60 @@ $RUNPODCTL_PATH = "$PSScriptRoot\runpodctl.exe"  # Path to runpodctl executable
 $VAST_API_KEY = if ($env:VAST_API_KEY) { $env:VAST_API_KEY } else { "" }
 $VASTAI_CLI_PATH = "$PSScriptRoot\vast.exe"  # Path to vast CLI (or 'vast' if in PATH)
 
+# GPU Tier Configurations
+# Each tier defines: GPU name filter, max price, min VRAM, recommended models
+$GPU_TIERS = @{
+    "RTX_4090" = @{
+        GpuName = "RTX_4090"
+        MaxPrice = 0.50
+        MinVram = 24
+        DiskGB = 50
+        Description = "24GB VRAM - Good for 7B-8B models"
+    }
+    "A6000" = @{
+        GpuName = "RTX_A6000"
+        MaxPrice = 0.80
+        MinVram = 48
+        DiskGB = 80
+        Description = "48GB VRAM - Good for 14B-30B models"
+    }
+    "A100_40GB" = @{
+        GpuName = "A100"
+        MaxPrice = 1.00
+        MinVram = 40
+        DiskGB = 100
+        Description = "40GB VRAM - Good for 14B-32B models"
+    }
+    "A100_80GB" = @{
+        GpuName = "A100"
+        MaxPrice = 2.00
+        MinVram = 80
+        DiskGB = 150
+        Description = "80GB VRAM - Good for 32B-70B models"
+    }
+    "A100_SXM" = @{
+        GpuName = "A100_SXM4"
+        MaxPrice = 2.50
+        MinVram = 80
+        DiskGB = 150
+        Description = "80GB VRAM SXM4 - Fastest A100 variant"
+    }
+    "H100" = @{
+        GpuName = "H100"
+        MaxPrice = 4.00
+        MinVram = 80
+        DiskGB = 150
+        Description = "80GB VRAM - Fastest, good for 70B+ models"
+    }
+}
+
 # Vast.ai instance defaults
-# RTX 4090 with 24GB VRAM - good for 8B models, much cheaper than RunPod
-$VAST_DEFAULT_GPU = "RTX_4090"  # GPU model filter
+$VAST_DEFAULT_GPU = "RTX_4090"  # Default GPU tier
 $VAST_DEFAULT_IMAGE = "pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel"  # Docker image
-$VAST_DEFAULT_DISK_GB = 50  # Disk space in GB
+$VAST_DEFAULT_DISK_GB = 50  # Disk space in GB (overridden by tier)
 $VAST_MIN_DOWNLOAD = 200  # Minimum download speed in Mbps
-$VAST_MAX_PRICE = 0.40  # Maximum price per hour
+$VAST_MAX_PRICE = 0.50  # Maximum price per hour (overridden by tier)
+$VAST_DEFAULT_NUM_GPUS = 1  # Number of GPUs (for multi-GPU support)
 
 # Vast.ai SSH settings (auto-configured by vast-create-pod)
 $VAST_SSH_HOST = ""
@@ -100,8 +147,10 @@ $DEFAULT_CONTAINER_DISK_GB = 40
 # ===========================
 
 $LOCAL_DIR = "C:\Development\Projects\heretic"
+$LOCAL_MODELS_DIR = "C:\Development\Projects\heretic\models"  # Local directory for downloaded models
 $REMOTE_DIR = "/workspace/heretic"
 $VAST_REMOTE_DIR = "/workspace"  # Vast.ai uses /workspace as default
+$VAST_MODELS_DIR = "/workspace/models"  # Remote directory for abliterated models
 $VLLM_PORT = 8000
 
 # ===== RUNPODCTL FUNCTIONS =====
@@ -243,12 +292,32 @@ function Get-VastSSHInfo {
 }
 
 function Get-FirstVastInstance {
+    # Returns the first RUNNING instance, or the configured instance if it's running
+    # Priority: 1) $VAST_INSTANCE_ID if running, 2) First running instance, 3) First instance
     if (Test-VastCliAvailable) {
         $output = Invoke-VastCli "show instances --raw"
         if ($output) {
             try {
                 $instances = $output | ConvertFrom-Json
                 if ($instances -and $instances.Count -gt 0) {
+                    # If we have a configured instance ID, check if it's running
+                    if ($VAST_INSTANCE_ID) {
+                        $configuredInstance = $instances | Where-Object { $_.id -eq [int]$VAST_INSTANCE_ID }
+                        if ($configuredInstance -and ($configuredInstance.actual_status -eq "running" -or $configuredInstance.status -eq "running")) {
+                            Write-Host "  Using configured instance: $VAST_INSTANCE_ID" -ForegroundColor Gray
+                            return $VAST_INSTANCE_ID
+                        }
+                    }
+                    
+                    # Find first running instance
+                    $runningInstance = $instances | Where-Object { $_.actual_status -eq "running" -or $_.status -eq "running" } | Select-Object -First 1
+                    if ($runningInstance) {
+                        Write-Host "  Found running instance: $($runningInstance.id)" -ForegroundColor Gray
+                        return $runningInstance.id
+                    }
+                    
+                    # Fallback to first instance (might be loading/stopped)
+                    Write-Host "  No running instances, using first instance: $($instances[0].id)" -ForegroundColor Gray
                     return $instances[0].id
                 }
             } catch {
@@ -309,10 +378,27 @@ function Get-VastSSHTarget {
     # Get SSH info
     $sshUrl = wsl -e bash -c "vastai ssh-url $InstanceId" 2>$null
     
+    # Format 1: ssh -p PORT root@HOST (IP address)
     if ($sshUrl -match '-p\s+(\d+)\s+\S+@([\d.]+)') {
         return "root@$($matches[2]) -p $($matches[1])"
-    } elseif ($sshUrl -match '@([\d.]+):(\d+)') {
+    }
+    # Format 2: ssh://root@HOST:PORT (IP address)
+    elseif ($sshUrl -match 'ssh://\S+@([\d.]+):(\d+)') {
         return "root@$($matches[1]) -p $($matches[2])"
+    }
+    # Format 3: ssh://root@HOSTNAME:PORT (hostname like ssh1.vast.ai)
+    elseif ($sshUrl -match 'ssh://([^@]+)@([^:]+):(\d+)') {
+        $sshUser = $matches[1]
+        $sshHost = $matches[2]
+        $sshPort = $matches[3]
+        return "$sshUser@$sshHost -p $sshPort"
+    }
+    # Format 4: ssh -p PORT user@HOSTNAME (hostname)
+    elseif ($sshUrl -match '-p\s+(\d+)\s+([^@]+)@(\S+)') {
+        $sshPort = $matches[1]
+        $sshUser = $matches[2]
+        $sshHost = $matches[3]
+        return "$sshUser@$sshHost -p $sshPort"
     }
     
     Write-Host "ERROR: Could not parse SSH URL: $sshUrl" -ForegroundColor Red
@@ -330,24 +416,53 @@ function Invoke-VastSSHCommand {
     # Ensure WSL has the SSH key with proper permissions
     Ensure-WSLSSHKey | Out-Null
     
-    # Get SSH target string
-    $sshTarget = Get-VastSSHTarget -InstanceId $InstanceId
-    if (-not $sshTarget) {
+    if (-not (Test-WSLAvailable)) {
+        Write-Host "ERROR: WSL required" -ForegroundColor Red
+        return $null
+    }
+    
+    if ($VAST_API_KEY) {
+        $env:VAST_API_KEY = $VAST_API_KEY
+    }
+    
+    # Get SSH URL from vastai
+    $sshUrl = wsl -e bash -c "vastai ssh-url $InstanceId" 2>$null
+    
+    # Parse: ssh://root@ssh1.vast.ai:35702 or similar formats
+    $sshHost = $null
+    $sshPort = $null
+    $sshUser = "root"
+    
+    if ($sshUrl -match 'ssh://([^@]+)@([^:]+):(\d+)') {
+        $sshUser = $matches[1]
+        $sshHost = $matches[2]
+        $sshPort = $matches[3]
+    } elseif ($sshUrl -match '-p\s+(\d+)\s+([^@]+)@(\S+)') {
+        $sshPort = $matches[1]
+        $sshUser = $matches[2]
+        $sshHost = $matches[3]
+    } elseif ($sshUrl -match '([^@]+)@([^:]+):(\d+)') {
+        $sshUser = $matches[1]
+        $sshHost = $matches[2]
+        $sshPort = $matches[3]
+    }
+    
+    if (-not $sshHost -or -not $sshPort) {
+        Write-Host "ERROR: Could not parse SSH URL: $sshUrl" -ForegroundColor Red
         return $null
     }
     
     if (-not $Quiet) {
-        Write-Host "Executing on Vast.ai via WSL..." -ForegroundColor Gray
+        Write-Host "Connecting to $sshUser@$sshHost port $sshPort..." -ForegroundColor Gray
     }
     
-    $heredocCmd = @"
-wsl -e bash -c 'ssh -tt -o StrictHostKeyChecking=no -o ConnectTimeout=$TimeoutSeconds $sshTarget <<"SSHEOF"
-$Commands
-exit
-SSHEOF'
-"@
+    # Escape single quotes in commands for bash
+    $escapedCommands = $Commands -replace "'", "'\\''"
     
-    $output = Invoke-Expression $heredocCmd
+    # Simple direct SSH command - no heredoc complexity
+    $sshCmd = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=$TimeoutSeconds -p $sshPort $sshUser@$sshHost '$escapedCommands'"
+    
+    $output = wsl -e bash -c $sshCmd 2>&1
     return $output
 }
 
@@ -385,9 +500,15 @@ RUNPOD MANAGEMENT:
   gpus             - List available GPU types
 
 VAST.AI MANAGEMENT (50% cheaper!):
-  vast-create-pod  - Create Vast.ai instance (RTX 4090 ~`$0.20/hr)
+  vast-create-pod [tier] [num_gpus] - Create Vast.ai instance
+                   Tiers: RTX_4090, A6000, A100_40GB, A100_80GB, A100_SXM, H100
+                   Examples:
+                     vast-create-pod              # RTX 4090, 1 GPU
+                     vast-create-pod A100_80GB    # A100 80GB, 1 GPU  
+                     vast-create-pod A100_80GB 2  # A100 80GB, 2 GPUs (for 70B models)
   vast-list        - List your instances
-  vast-gpus        - Search available GPU offers
+  vast-gpus [tier] - Search available GPU offers (default: RTX_4090)
+  vast-tiers       - List all GPU tiers and pricing
   vast-stop [id]   - Stop instance
   vast-start [id]  - Start instance  
   vast-terminate [id] - Destroy instance
@@ -397,6 +518,10 @@ VAST.AI MANAGEMENT (50% cheaper!):
   vast-exec <cmd>  - Execute command on Vast.ai
   vast-status      - GPU status on Vast.ai
   vast-progress    - Check abliteration progress
+  vast-watch       - Live dashboard monitoring (updates every 30s)
+  vast-models      - List abliterated models on Vast.ai
+  vast-download <remote> [local] - Download file/directory from Vast.ai
+  vast-download-model [model]    - Download abliterated model to local machine
   vast-hf-login    - Configure HuggingFace token
   vast-hf-test     - Test HuggingFace authentication
   
@@ -444,10 +569,25 @@ QUICK START (RunPod):
   .\runpod.ps1 stop-pod                      # 4. Stop when done
 
 QUICK START (Vast.ai - cheaper!):
-  .\runpod.ps1 vast-create-pod               # 1. Create instance
+  .\runpod.ps1 vast-create-pod               # 1. Create instance (RTX 4090)
   .\runpod.ps1 vast-setup                    # 2. Install heretic
   .\runpod.ps1 vast-run Qwen/Qwen3-4B-Instruct-2507  # 3. Abliterate
-  .\runpod.ps1 vast-stop                     # 4. Stop when done
+  .\runpod.ps1 vast-download-model           # 4. Download model to local
+  .\runpod.ps1 vast-stop                     # 5. Stop when done
+
+LARGE MODEL WORKFLOW (70B+ models):
+  .\runpod.ps1 vast-create-pod A100_80GB 2   # 1. Create with 2x A100 80GB (~`$3/hr)
+  .\runpod.ps1 vast-setup                    # 2. Install heretic
+  .\runpod.ps1 vast-run Qwen/Qwen2.5-72B-Instruct  # 3. Abliterate 72B model
+  .\runpod.ps1 vast-download-model           # 4. Download model to local (~1hr for 70B)
+  .\runpod.ps1 vast-stop                     # 5. Stop when done
+
+GPU TIERS & PRICING:
+  RTX_4090    (24GB)  ~`$0.20-0.40/hr  - 7B-8B models
+  A6000       (48GB)  ~`$0.40-0.70/hr  - 14B-30B models
+  A100_40GB   (40GB)  ~`$0.50-0.90/hr  - 14B-32B models
+  A100_80GB   (80GB)  ~`$1.00-1.80/hr  - 32B-70B models (single), 70B+ (multi)
+  H100        (80GB)  ~`$1.50-3.50/hr  - 70B+ models, fastest
 
 EXAMPLES:
   .\runpod.ps1 run meta-llama/Llama-3.1-8B-Instruct
@@ -1639,9 +1779,43 @@ wsl -e vastai %*
         Write-Host "Test with: .\runpod.ps1 vast-gpus" -ForegroundColor Cyan
     }
     
+    "vast-tiers" {
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "  Available GPU Tiers" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host ("{0,-15} {1,8} {2,12} {3,-35}" -f "TIER", "VRAM", "MAX PRICE", "RECOMMENDED FOR") -ForegroundColor White
+        Write-Host ("-" * 75)
+        
+        foreach ($tierName in @("RTX_4090", "A6000", "A100_40GB", "A100_80GB", "A100_SXM", "H100")) {
+            $tier = $GPU_TIERS[$tierName]
+            $vram = "$($tier.MinVram)GB"
+            $price = "`$$($tier.MaxPrice)/hr"
+            Write-Host ("{0,-15} {1,8} {2,12} {3,-35}" -f $tierName, $vram, $price, $tier.Description)
+        }
+        
+        Write-Host ""
+        Write-Host "MODEL SIZE RECOMMENDATIONS:" -ForegroundColor Yellow
+        Write-Host "  7B-8B models   -> RTX_4090 (1 GPU)" -ForegroundColor White
+        Write-Host "  14B-30B models -> A6000 or A100_40GB (1 GPU)" -ForegroundColor White
+        Write-Host "  32B models     -> A100_80GB (1 GPU)" -ForegroundColor White
+        Write-Host "  70B-72B models -> A100_80GB (2 GPUs) or H100 (2 GPUs)" -ForegroundColor White
+        Write-Host ""
+        Write-Host "MULTI-GPU EXAMPLES:" -ForegroundColor Yellow
+        Write-Host "  .\runpod.ps1 vast-create-pod A100_80GB 2   # ~`$3-4/hr, good for 70B" -ForegroundColor White
+        Write-Host "  .\runpod.ps1 vast-create-pod H100 2        # ~`$4-7/hr, fastest for 70B" -ForegroundColor White
+        Write-Host ""
+    }
+    
     "vast-gpus" {
+        # Get GPU tier from argument or use default
+        $gpuTier = if ($Arg1 -and $GPU_TIERS.ContainsKey($Arg1)) { $Arg1 } else { $VAST_DEFAULT_GPU }
+        $tierConfig = $GPU_TIERS[$gpuTier]
+        
         Write-Host "Searching Vast.ai GPU offers..." -ForegroundColor Green
-        Write-Host "(Filtering: RTX 4090, >`$VAST_MIN_DOWNLOAD Mbps, <`$VAST_MAX_PRICE/hr)" -ForegroundColor Gray
+        Write-Host "Tier: $gpuTier ($($tierConfig.Description))" -ForegroundColor Cyan
+        Write-Host "(Filtering: $($tierConfig.GpuName), >$VAST_MIN_DOWNLOAD Mbps, <`$$($tierConfig.MaxPrice)/hr)" -ForegroundColor Gray
         Write-Host ""
         
         if (-not (Test-WSLAvailable)) {
@@ -1649,8 +1823,19 @@ wsl -e vastai %*
             exit 1
         }
         
-        # Search for offers matching our criteria
-        $searchCmd = "vastai search offers 'gpu_name=$VAST_DEFAULT_GPU rentable=true num_gpus=1 inet_down>=$VAST_MIN_DOWNLOAD dph<=$VAST_MAX_PRICE' --order 'dph' --limit 20"
+        # Build search query based on tier
+        # For A100 tiers, we need to filter by VRAM to distinguish 40GB vs 80GB
+        # Vast.ai reports gpu_ram in MB, so multiply GB by 1024
+        $gpuFilter = $tierConfig.GpuName
+        $vramFilterMB = $tierConfig.MinVram * 1024
+        $vramFilter = if ($tierConfig.MinVram -ge 40) { "gpu_ram>=$vramFilterMB" } else { "" }
+        
+        $searchQuery = "gpu_name=$gpuFilter rentable=true num_gpus>=1 inet_down>=$VAST_MIN_DOWNLOAD dph<=$($tierConfig.MaxPrice)"
+        if ($vramFilter) {
+            $searchQuery += " $vramFilter"
+        }
+        
+        $searchCmd = "vastai search offers '$searchQuery' --order 'dph' --limit 20"
         if ($VAST_API_KEY) {
             $env:VAST_API_KEY = $VAST_API_KEY
         }
@@ -1659,7 +1844,10 @@ wsl -e vastai %*
         Write-Host $output
         
         Write-Host ""
-        Write-Host "To create an instance: .\runpod.ps1 vast-create-pod" -ForegroundColor Cyan
+        Write-Host "Available GPU tiers: RTX_4090, A6000, A100_40GB, A100_80GB, A100_SXM, H100" -ForegroundColor Yellow
+        Write-Host "Search other tiers: .\runpod.ps1 vast-gpus A100_80GB" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "To create an instance: .\runpod.ps1 vast-create-pod $gpuTier" -ForegroundColor Cyan
     }
     
     "vast-create-pod" {
@@ -1675,22 +1863,54 @@ wsl -e vastai %*
             exit 1
         }
         
+        # Parse GPU tier argument
+        if ($Arg1 -and -not $GPU_TIERS.ContainsKey($Arg1)) {
+            Write-Host "WARNING: Unknown tier '$Arg1', using $VAST_DEFAULT_GPU" -ForegroundColor Yellow
+            Write-Host "Valid tiers: RTX_4090, A6000, A100_40GB, A100_80GB, A100_SXM, H100" -ForegroundColor Yellow
+            Write-Host ""
+        }
+        $gpuTier = if ($Arg1 -and $GPU_TIERS.ContainsKey($Arg1)) { $Arg1 } else { $VAST_DEFAULT_GPU }
+        $numGpus = if ($Arg2 -and $Arg2 -match '^\d+$') { [int]$Arg2 } else { $VAST_DEFAULT_NUM_GPUS }
+        
+        # Get tier configuration
+        $tierConfig = $GPU_TIERS[$gpuTier]
+        $diskGB = $tierConfig.DiskGB
+        $maxPrice = $tierConfig.MaxPrice * $numGpus  # Scale price by number of GPUs
+        
+        # For multi-GPU, increase disk space
+        if ($numGpus -gt 1) {
+            $diskGB = [math]::Max($diskGB, 200)
+        }
+        
         Write-Host ""
         Write-Host "========================================" -ForegroundColor Cyan
         Write-Host "  Creating Vast.ai Instance" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "GPU: $VAST_DEFAULT_GPU" -ForegroundColor Yellow
+        Write-Host "GPU Tier: $gpuTier ($($tierConfig.Description))" -ForegroundColor Yellow
+        Write-Host "Num GPUs: $numGpus" -ForegroundColor Yellow
         Write-Host "Image: $VAST_DEFAULT_IMAGE" -ForegroundColor Yellow
-        Write-Host "Disk: $VAST_DEFAULT_DISK_GB GB" -ForegroundColor Yellow
-        Write-Host "Max price: `$$VAST_MAX_PRICE/hr" -ForegroundColor Yellow
+        Write-Host "Disk: $diskGB GB" -ForegroundColor Yellow
+        Write-Host "Max price: `$$maxPrice/hr ($($tierConfig.MaxPrice) x $numGpus GPUs)" -ForegroundColor Yellow
         Write-Host ""
         
         # Find best offer
         Write-Host "[1/3] Finding best GPU offer..." -ForegroundColor Yellow
         $env:VAST_API_KEY = $VAST_API_KEY
         
-        $searchCmd = "vastai search offers 'gpu_name=$VAST_DEFAULT_GPU rentable=true num_gpus=1 inet_down>=$VAST_MIN_DOWNLOAD dph<=$VAST_MAX_PRICE' --order 'dph' --limit 1 --raw"
+        # Build search query based on tier
+        # For A100 tiers, filter by VRAM to distinguish 40GB vs 80GB
+        # Vast.ai reports gpu_ram in MB, so multiply GB by 1024
+        $gpuFilter = $tierConfig.GpuName
+        $vramFilterMB = $tierConfig.MinVram * 1024
+        $vramFilter = if ($tierConfig.MinVram -ge 40) { "gpu_ram>=$vramFilterMB" } else { "" }
+        
+        $searchQuery = "gpu_name=$gpuFilter rentable=true num_gpus>=$numGpus inet_down>=$VAST_MIN_DOWNLOAD dph<=$maxPrice"
+        if ($vramFilter) {
+            $searchQuery += " $vramFilter"
+        }
+        
+        $searchCmd = "vastai search offers '$searchQuery' --order 'dph' --limit 1 --raw"
         $offerJson = wsl -e bash -c $searchCmd 2>$null
         
         if (-not $offerJson -or $offerJson -match "error" -or $offerJson -match "No offers") {
@@ -1703,14 +1923,21 @@ wsl -e vastai %*
             $offers = $offerJson | ConvertFrom-Json
             if (-not $offers -or $offers.Count -eq 0) {
                 Write-Host "ERROR: No offers returned" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Suggestions:" -ForegroundColor Yellow
+                Write-Host "  - Try a different GPU tier: .\runpod.ps1 vast-gpus A100_80GB" -ForegroundColor White
+                Write-Host "  - Check available offers: .\runpod.ps1 vast-gpus $gpuTier" -ForegroundColor White
+                Write-Host "  - For 70B models, try: .\runpod.ps1 vast-create-pod A100_80GB 2" -ForegroundColor White
                 exit 1
             }
             $bestOffer = $offers[0]
             $offerId = $bestOffer.id
             $price = [math]::Round($bestOffer.dph_total, 3)
             $gpuName = $bestOffer.gpu_name
+            $offerNumGpus = if ($bestOffer.num_gpus) { $bestOffer.num_gpus } else { 1 }
+            $offerVram = if ($bestOffer.gpu_ram) { [math]::Round($bestOffer.gpu_ram / 1024, 0) } else { "?" }
             
-            Write-Host "  Found: $gpuName at `$$price/hr (offer ID: $offerId)" -ForegroundColor Green
+            Write-Host "  Found: $offerNumGpus x $gpuName ($($offerVram)GB each) at `$$price/hr (offer ID: $offerId)" -ForegroundColor Green
         } catch {
             # Try parsing as simple text
             if ($offerJson -match '^\s*(\d+)') {
@@ -1725,7 +1952,7 @@ wsl -e vastai %*
         
         # Create the instance
         Write-Host "[2/3] Creating instance..." -ForegroundColor Yellow
-        $createCmd = "vastai create instance $offerId --image '$VAST_DEFAULT_IMAGE' --disk $VAST_DEFAULT_DISK_GB --ssh --raw"
+        $createCmd = "vastai create instance $offerId --image '$VAST_DEFAULT_IMAGE' --disk $diskGB --ssh --raw"
         $createResult = wsl -e bash -c $createCmd 2>&1
         
         Write-Host $createResult -ForegroundColor Gray
@@ -1948,6 +2175,7 @@ wsl -e vastai %*
         $instanceId = if ($Arg1) { $Arg1 } else { $VAST_INSTANCE_ID }
         
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -1963,29 +2191,36 @@ wsl -e vastai %*
         Write-Host ""
         Write-Host "Instance ID: $instanceId" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "[1/4] Connecting via SSH..." -ForegroundColor Yellow
+        Write-Host "[1/5] Connecting via SSH..." -ForegroundColor Yellow
         
+        # Note: PyTorch Docker image doesn't have git installed, so we need to install it first
         $setupCommands = @"
-echo '[2/4] Configuring workspace...'
+echo '[2/5] Installing git (required for pip install from GitHub)...'
+apt-get update -qq && apt-get install -y -qq git > /dev/null 2>&1 || { echo 'ERROR: Failed to install git'; exit 1; }
+echo '  git installed'
+
+echo '[3/5] Configuring workspace...'
 mkdir -p /workspace/.cache/huggingface
+mkdir -p /workspace/models
 export HF_HOME=/workspace/.cache/huggingface
 export TRANSFORMERS_CACHE=/workspace/.cache/huggingface
 grep -q 'HF_HOME' ~/.bashrc || echo 'export HF_HOME=/workspace/.cache/huggingface' >> ~/.bashrc
 
-echo '[3/4] Installing heretic from your fork...'
+echo '[4/5] Installing heretic from GitHub...'
 pip install --quiet git+https://github.com/quanticsoul4772/heretic.git
+echo '  heretic installed'
 
-echo '[4/4] Checking GPU...'
+echo '[5/5] Checking GPU...'
 nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader
 echo ''
 echo '========================================'
 echo '  SETUP COMPLETE!'
 echo '========================================'
 echo ''
-echo 'Next: .\\runpod.ps1 vast-run <model>'
+echo 'Next: .\\runpod.ps1 vast-run [model]'
 "@
         
-        $output = Invoke-VastSSHCommand -Commands $setupCommands -InstanceId $instanceId -TimeoutSeconds 60
+        $output = Invoke-VastSSHCommand -Commands $setupCommands -InstanceId $instanceId -TimeoutSeconds 180
         Write-Host $output
         
         Write-Host ""
@@ -1999,11 +2234,18 @@ echo 'Next: .\\runpod.ps1 vast-run <model>'
             Write-Host "Examples:" -ForegroundColor Yellow
             Write-Host "  .\runpod.ps1 vast-run Qwen/Qwen3-4B-Instruct-2507" -ForegroundColor White
             Write-Host "  .\runpod.ps1 vast-run meta-llama/Llama-3.1-8B-Instruct" -ForegroundColor White
+            Write-Host "  .\runpod.ps1 vast-run Qwen/Qwen2.5-72B-Instruct  # Requires A100 80GB x2" -ForegroundColor White
+            Write-Host ""
+            Write-Host "GPU requirements by model size:" -ForegroundColor Yellow
+            Write-Host "  7B-8B   -> RTX 4090 (24GB)" -ForegroundColor White
+            Write-Host "  14B-32B -> A100 40-80GB" -ForegroundColor White
+            Write-Host "  70B-72B -> A100 80GB x2 or H100 x2" -ForegroundColor White
             exit 1
         }
         
         $instanceId = $VAST_INSTANCE_ID
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -2048,6 +2290,7 @@ heretic $Arg1 --auto-select --auto-select-path $outputPath
         
         $instanceId = $VAST_INSTANCE_ID
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -2065,6 +2308,7 @@ heretic $Arg1 --auto-select --auto-select-path $outputPath
     "vast-status" {
         $instanceId = $VAST_INSTANCE_ID
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -2082,6 +2326,7 @@ heretic $Arg1 --auto-select --auto-select-path $outputPath
     "vast-progress" {
         $instanceId = $VAST_INSTANCE_ID
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -2109,9 +2354,195 @@ ls -la /workspace/*.db 2>/dev/null; ls -la /workspace/models/ 2>/dev/null; echo 
         Write-Host $output
     }
     
+    "vast-watch" {
+        $instanceId = $VAST_INSTANCE_ID
+        if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
+            $instanceId = Get-FirstVastInstance
+        }
+        
+        if (-not $instanceId) {
+            Write-Host "ERROR: No instance ID" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Get interval from argument or default to 30 seconds
+        $interval = if ($Arg1 -and $Arg1 -match '^\d+$') { [int]$Arg1 } else { 30 }
+        
+        # Track start time for elapsed time calculation
+        $watchStartTime = Get-Date
+        $lastProcessRunning = $true
+        
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "  Vast.ai Live Dashboard" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Instance: $instanceId" -ForegroundColor Yellow
+        Write-Host "Refresh: Every $interval seconds" -ForegroundColor Gray
+        Write-Host "Press Ctrl+C to exit" -ForegroundColor Gray
+        Write-Host ""
+        
+        while ($true) {
+            # Clear screen and redraw
+            Clear-Host
+            
+            $currentTime = Get-Date
+            $elapsed = $currentTime - $watchStartTime
+            $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
+            
+            # Header
+            Write-Host ""
+            Write-Host "  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+            Write-Host "  ║              VAST.AI ABLITERATION DASHBOARD                  ║" -ForegroundColor Cyan
+            Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Instance: $instanceId    Time: $(Get-Date -Format 'HH:mm:ss')    Watch: $elapsedStr" -ForegroundColor Gray
+            Write-Host ""
+            
+            # Get all status info in one SSH call for efficiency
+            $statusCommands = 'PROC=$(ps aux | grep "[h]eretic" | head -1); if [ -n "$PROC" ]; then MODEL=$(echo "$PROC" | awk "{for(i=1;i<=NF;i++) if(\$i ~ /\\//) print \$i}" | head -1); RUNTIME=$(echo "$PROC" | awk "{print \$10}"); CPU=$(echo "$PROC" | awk "{print \$3}"); MEM=$(echo "$PROC" | awk "{print \$4}"); echo "PROCESS:RUNNING"; echo "MODEL:$MODEL"; echo "RUNTIME:$RUNTIME"; echo "CPU:$CPU"; echo "MEM:$MEM"; else echo "PROCESS:STOPPED"; fi; echo "---"; nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null; echo "---"; if [ -d /workspace/models ]; then ls -1 /workspace/models/ 2>/dev/null | head -5; else echo "(none)"; fi; echo "---"; df -h /workspace 2>/dev/null | tail -1 | awk "{print \$3\"/\"\$2\" (\"\$5\" used)"}"'
+            
+            $output = Invoke-VastSSHCommand -Commands $statusCommands -InstanceId $instanceId -Quiet -TimeoutSeconds 15
+            
+            # Parse the output
+            $sections = ($output -join "`n") -split '---'
+            $processSection = $sections[0] -split "`n" | Where-Object { $_ -match '^(PROCESS|MODEL|RUNTIME|CPU|MEM):' }
+            $gpuSection = $sections[1] -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch 'Welcome to' -and $_ -notmatch 'authentication' }
+            $modelsSection = $sections[2] -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch 'Welcome to' }
+            $diskSection = $sections[3] -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch 'Welcome to' } | Select-Object -First 1
+            
+            # Parse process info
+            $processRunning = $false
+            $modelName = "N/A"
+            $runtime = "N/A"
+            $cpuUsage = "N/A"
+            $memUsage = "N/A"
+            
+            foreach ($line in $processSection) {
+                if ($line -match '^PROCESS:(.+)') { $processRunning = ($matches[1] -eq "RUNNING") }
+                if ($line -match '^MODEL:(.+)') { $modelName = $matches[1].Trim() }
+                if ($line -match '^RUNTIME:(.+)') { $runtime = $matches[1].Trim() }
+                if ($line -match '^CPU:(.+)') { $cpuUsage = $matches[1].Trim() + "%" }
+                if ($line -match '^MEM:(.+)') { $memUsage = $matches[1].Trim() + "%" }
+            }
+            
+            # Process Status Section
+            Write-Host "  ┌─ PROCESS ───────────────────────────────────────────────────┐" -ForegroundColor White
+            if ($processRunning) {
+                Write-Host "  │  Status:  " -NoNewline -ForegroundColor White
+                Write-Host "● RUNNING" -NoNewline -ForegroundColor Green
+                Write-Host "                                             │" -ForegroundColor White
+                Write-Host "  │  Model:   $($modelName.PadRight(50))│" -ForegroundColor White
+                Write-Host "  │  Runtime: $($runtime.PadRight(50))│" -ForegroundColor White
+                Write-Host "  │  CPU:     $($cpuUsage.PadRight(20))Mem: $($memUsage.PadRight(22))│" -ForegroundColor White
+            } else {
+                Write-Host "  │  Status:  " -NoNewline -ForegroundColor White
+                Write-Host "○ NOT RUNNING" -NoNewline -ForegroundColor Yellow
+                Write-Host "                                         │" -ForegroundColor White
+                Write-Host "  │                                                              │" -ForegroundColor White
+                
+                # Check if process just finished
+                if ($lastProcessRunning -and -not $processRunning) {
+                    Write-Host "  │  " -NoNewline -ForegroundColor White
+                    Write-Host "★ ABLITERATION COMPLETE! ★" -NoNewline -ForegroundColor Green
+                    Write-Host "                                  │" -ForegroundColor White
+                }
+            }
+            Write-Host "  └──────────────────────────────────────────────────────────────┘" -ForegroundColor White
+            Write-Host ""
+            
+            # GPU Status Section
+            Write-Host "  ┌─ GPUs ────────────────────────────────────────────────────────┐" -ForegroundColor White
+            $gpuIndex = 0
+            foreach ($gpuLine in $gpuSection) {
+                # Match: GPU_NAME, UTIL%, MEM_USED, MEM_TOTAL, TEMP, POWER
+                $gpuPattern = '^\s*(.+?),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+\.?\d*)'
+                if ($gpuLine -match $gpuPattern) {
+                    $gpuName = $matches[1].Trim()
+                    $gpuUtil = [int]$matches[2]
+                    $memUsed = [int]$matches[3]
+                    $memTotal = [int]$matches[4]
+                    $temp = $matches[5]
+                    $power = $matches[6]
+                    
+                    $memPercent = [math]::Round(($memUsed / $memTotal) * 100)
+                    $memUsedGB = [math]::Round($memUsed / 1024, 1)
+                    $memTotalGB = [math]::Round($memTotal / 1024, 1)
+                    
+                    # Create progress bar for GPU util
+                    $barLen = 20
+                    $filledLen = [math]::Round(($gpuUtil / 100) * $barLen)
+                    $bar = ("█" * $filledLen) + ("░" * ($barLen - $filledLen))
+                    
+                    $utilColor = if ($gpuUtil -gt 80) { "Green" } elseif ($gpuUtil -gt 30) { "Yellow" } else { "Gray" }
+                    
+                    Write-Host "  │  GPU $gpuIndex : $($gpuName.Substring(0, [Math]::Min(25, $gpuName.Length)).PadRight(25))" -NoNewline -ForegroundColor White
+                    Write-Host "$temp°C" -NoNewline -ForegroundColor Cyan
+                    Write-Host "  ${power}W" -NoNewline -ForegroundColor Gray
+                    Write-Host "       │" -ForegroundColor White
+                    
+                    Write-Host "  │         Util: " -NoNewline -ForegroundColor White
+                    Write-Host "$bar" -NoNewline -ForegroundColor $utilColor
+                    Write-Host " $($gpuUtil.ToString().PadLeft(3))%" -NoNewline -ForegroundColor $utilColor
+                    Write-Host "                  │" -ForegroundColor White
+                    
+                    Write-Host "  │         VRAM: $memUsedGB / $memTotalGB GB ($memPercent%)" -NoNewline -ForegroundColor White
+                    $padding = 62 - "         VRAM: $memUsedGB / $memTotalGB GB ($memPercent%)".Length
+                    Write-Host (" " * [Math]::Max(1, $padding)) -NoNewline
+                    Write-Host "│" -ForegroundColor White
+                    
+                    $gpuIndex++
+                }
+            }
+            if ($gpuIndex -eq 0) {
+                Write-Host "  │  (No GPU data available)                                    │" -ForegroundColor Gray
+            }
+            Write-Host "  └──────────────────────────────────────────────────────────────┘" -ForegroundColor White
+            Write-Host ""
+            
+            # Output Models Section
+            Write-Host "  ┌─ OUTPUT MODELS ────────────────────────────────────────────────┐" -ForegroundColor White
+            $modelCount = 0
+            foreach ($model in $modelsSection) {
+                $modelTrimmed = $model.Trim()
+                if ($modelTrimmed -and $modelTrimmed -ne "(none)") {
+                    Write-Host "  │    ✓ $($modelTrimmed.PadRight(56))│" -ForegroundColor Green
+                    $modelCount++
+                }
+            }
+            if ($modelCount -eq 0) {
+                Write-Host "  │    (No models saved yet - will appear when complete)        │" -ForegroundColor Gray
+            }
+            Write-Host "  └──────────────────────────────────────────────────────────────┘" -ForegroundColor White
+            Write-Host ""
+            
+            # Disk Usage
+            if ($diskSection) {
+                Write-Host "  Disk: $diskSection" -ForegroundColor Gray
+            }
+            
+            Write-Host ""
+            Write-Host "  ────────────────────────────────────────────────────────────────" -ForegroundColor DarkGray
+            Write-Host "  Refreshing in $interval seconds... (Ctrl+C to exit)" -ForegroundColor DarkGray
+            Write-Host ""
+            
+            # Commands hint
+            Write-Host "  Quick commands:" -ForegroundColor DarkGray
+            Write-Host "    .\runpod.ps1 vast-download-model  - Download completed model" -ForegroundColor DarkGray
+            Write-Host "    .\runpod.ps1 vast-stop            - Stop instance (save money!)" -ForegroundColor DarkGray
+            
+            $lastProcessRunning = $processRunning
+            
+            # Sleep for interval
+            Start-Sleep -Seconds $interval
+        }
+    }
+    
     "vast-hf-login" {
         $instanceId = $VAST_INSTANCE_ID
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -2137,6 +2568,7 @@ ls -la /workspace/*.db 2>/dev/null; ls -la /workspace/models/ 2>/dev/null; echo 
     "vast-hf-test" {
         $instanceId = $VAST_INSTANCE_ID
         if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
             $instanceId = Get-FirstVastInstance
         }
         
@@ -2148,6 +2580,303 @@ ls -la /workspace/*.db 2>/dev/null; ls -la /workspace/models/ 2>/dev/null; echo 
         Write-Host "Testing HuggingFace authentication on Vast.ai..." -ForegroundColor Green
         $output = Invoke-VastSSHCommand -Commands "huggingface-cli whoami" -InstanceId $instanceId -Quiet
         Write-Host $output
+    }
+    
+    "vast-models" {
+        $instanceId = $VAST_INSTANCE_ID
+        if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
+            $instanceId = Get-FirstVastInstance
+        }
+        
+        if (-not $instanceId) {
+            Write-Host "ERROR: No instance ID. Run vast-create-pod first." -ForegroundColor Red
+            exit 1
+        }
+        
+        Write-Host ""
+        Write-Host "Listing abliterated models on Vast.ai..." -ForegroundColor Cyan
+        Write-Host ""
+        
+        $listCommands = 'echo "Models in /workspace/models:"; echo ""; if [ -d /workspace/models ]; then ls -lh /workspace/models/ 2>/dev/null | grep -v "^total"; echo ""; echo "Model sizes:"; du -sh /workspace/models/*/ 2>/dev/null; else echo "  (models directory does not exist yet)"; fi'
+        
+        $output = Invoke-VastSSHCommand -Commands $listCommands -InstanceId $instanceId -Quiet
+        Write-Host $output
+        
+        Write-Host ""
+        Write-Host "Download a model: .\runpod.ps1 vast-download-model [model-name]" -ForegroundColor Yellow
+    }
+    
+    "vast-download" {
+        if (-not $Arg1) {
+            Write-Host "ERROR: Specify remote path to download" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "Usage: .\runpod.ps1 vast-download [remote-path] [local-path]" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Examples:" -ForegroundColor Yellow
+            Write-Host "  .\runpod.ps1 vast-download /workspace/models/my-model" -ForegroundColor White
+            Write-Host "  .\runpod.ps1 vast-download /workspace/output.txt C:\Downloads\" -ForegroundColor White
+            exit 1
+        }
+        
+        $instanceId = $VAST_INSTANCE_ID
+        if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
+            $instanceId = Get-FirstVastInstance
+        }
+        
+        if (-not $instanceId) {
+            Write-Host "ERROR: No instance ID. Run vast-create-pod first." -ForegroundColor Red
+            exit 1
+        }
+        
+        if (-not (Test-WSLAvailable)) {
+            Write-Host "ERROR: WSL required for file download" -ForegroundColor Red
+            exit 1
+        }
+        
+        $remotePath = $Arg1
+        $localPath = if ($Arg2) { $Arg2 } else { $LOCAL_DIR }
+        
+        # Convert Windows path to WSL path
+        $wslLocalPath = ($localPath -replace '^([A-Za-z]):', '/mnt/$1' -replace '\\', '/').ToLower()
+        
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "  Downloading from Vast.ai" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Remote: $remotePath" -ForegroundColor Yellow
+        Write-Host "Local:  $localPath" -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Ensure WSL has SSH key
+        Ensure-WSLSSHKey | Out-Null
+        
+        # Get SSH target
+        $sshTarget = Get-VastSSHTarget -InstanceId $instanceId
+        if (-not $sshTarget) {
+            Write-Host "ERROR: Could not get SSH connection info" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Parse host and port from sshTarget (format: root@HOST -p PORT)
+        if ($sshTarget -match 'root@([\d.]+)\s+-p\s+(\d+)') {
+            $sshHost = $matches[1]
+            $sshPort = $matches[2]
+        } else {
+            Write-Host "ERROR: Could not parse SSH target: $sshTarget" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Ensure local directory exists
+        if (-not (Test-Path $localPath)) {
+            Write-Host "Creating local directory: $localPath" -ForegroundColor Gray
+            New-Item -ItemType Directory -Path $localPath -Force | Out-Null
+        }
+        
+        Write-Host "Starting download (this may take a while for large models)..." -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Use SCP via WSL with progress
+        $scpCmd = "scp -r -o StrictHostKeyChecking=no -P $sshPort root@${sshHost}:$remotePath $wslLocalPath"
+        
+        Write-Host "Running: $scpCmd" -ForegroundColor Gray
+        Write-Host ""
+        
+        # Execute SCP - use wsl directly for real-time output
+        wsl -e bash -c $scpCmd
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
+            Write-Host "========================================" -ForegroundColor Green
+            Write-Host "  Download Complete!" -ForegroundColor Green
+            Write-Host "========================================" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "Files saved to: $localPath" -ForegroundColor Cyan
+        } else {
+            Write-Host ""
+            Write-Host "ERROR: Download failed (exit code: $LASTEXITCODE)" -ForegroundColor Red
+        }
+    }
+    
+    "vast-download-model" {
+        $instanceId = $VAST_INSTANCE_ID
+        if (-not $instanceId) {
+            Write-Host "Looking for running instance..." -ForegroundColor Gray
+            $instanceId = Get-FirstVastInstance
+        }
+        
+        if (-not $instanceId) {
+            Write-Host "ERROR: No instance ID. Run vast-create-pod first." -ForegroundColor Red
+            exit 1
+        }
+        
+        if (-not (Test-WSLAvailable)) {
+            Write-Host "ERROR: WSL required for model download" -ForegroundColor Red
+            exit 1
+        }
+        
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "  Download Abliterated Model" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host ""
+        
+        # First, list available models if no specific model requested
+        $modelName = $Arg1
+        
+        if (-not $modelName) {
+            Write-Host "Scanning for available models..." -ForegroundColor Yellow
+            Write-Host ""
+            
+            $listCmd = "ls -1 $VAST_MODELS_DIR/ 2>/dev/null | grep -E '.*-heretic$'"
+            $models = Invoke-VastSSHCommand -Commands $listCmd -InstanceId $instanceId -Quiet
+            
+            if (-not $models -or $models -match "No such file") {
+                Write-Host "ERROR: No abliterated models found in $VAST_MODELS_DIR" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Run abliteration first: .\runpod.ps1 vast-run [model]" -ForegroundColor Yellow
+                exit 1
+            }
+            
+            # Parse models into array
+            $modelList = $models -split "`n" | Where-Object { $_.Trim() -ne "" -and $_ -notmatch "^exit" -and $_ -notmatch "^Connection" }
+            
+            if ($modelList.Count -eq 0) {
+                Write-Host "ERROR: No abliterated models found" -ForegroundColor Red
+                exit 1
+            } elseif ($modelList.Count -eq 1) {
+                $modelName = $modelList[0].Trim()
+                Write-Host "Found model: $modelName" -ForegroundColor Green
+            } else {
+                Write-Host "Available models:" -ForegroundColor Cyan
+                $i = 1
+                foreach ($m in $modelList) {
+                    $mName = $m.Trim()
+                    if ($mName) {
+                        Write-Host "  [$i] $mName" -ForegroundColor White
+                        $i++
+                    }
+                }
+                Write-Host ""
+                $selection = Read-Host "Select model number (or press Enter for most recent)"
+                
+                if ($selection -match '^\d+$' -and [int]$selection -le $modelList.Count -and [int]$selection -gt 0) {
+                    $modelName = $modelList[[int]$selection - 1].Trim()
+                } else {
+                    # Default to last (most recent) model
+                    $modelName = $modelList[-1].Trim()
+                }
+            }
+        }
+        
+        $remotePath = "$VAST_MODELS_DIR/$modelName"
+        $localPath = $LOCAL_MODELS_DIR
+        
+        # Convert Windows path to WSL path
+        $wslLocalPath = ($localPath -replace '^([A-Za-z]):', '/mnt/$1' -replace '\\', '/').ToLower()
+        
+        Write-Host ""
+        Write-Host "Model: $modelName" -ForegroundColor Yellow
+        Write-Host "Remote: $remotePath" -ForegroundColor Yellow
+        Write-Host "Local:  $localPath\$modelName" -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Get model size
+        Write-Host "Checking model size..." -ForegroundColor Gray
+        $sizeCmd = "du -sh $remotePath 2>/dev/null | cut -f1"
+        $modelSize = Invoke-VastSSHCommand -Commands $sizeCmd -InstanceId $instanceId -Quiet
+        $modelSize = ($modelSize -split "`n" | Where-Object { $_ -match '^[0-9]' } | Select-Object -First 1)
+        if ($modelSize) {
+            Write-Host "Model size: $($modelSize.Trim())" -ForegroundColor Cyan
+        }
+        
+        Write-Host ""
+        Write-Host "NOTE: Large models (70B+) can take 30-60+ minutes to download." -ForegroundColor Yellow
+        Write-Host "      Make sure you have enough disk space locally." -ForegroundColor Yellow
+        Write-Host ""
+        
+        $confirm = Read-Host "Start download? (y/n)"
+        if ($confirm -ne "y" -and $confirm -ne "Y") {
+            Write-Host "Cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+        
+        # Ensure WSL has SSH key
+        Ensure-WSLSSHKey | Out-Null
+        
+        # Get SSH target
+        $sshTarget = Get-VastSSHTarget -InstanceId $instanceId
+        if (-not $sshTarget) {
+            Write-Host "ERROR: Could not get SSH connection info" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Parse host and port
+        if ($sshTarget -match 'root@([\d.]+)\s+-p\s+(\d+)') {
+            $sshHost = $matches[1]
+            $sshPort = $matches[2]
+        } else {
+            Write-Host "ERROR: Could not parse SSH target" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Ensure local models directory exists
+        if (-not (Test-Path $localPath)) {
+            Write-Host "Creating local models directory: $localPath" -ForegroundColor Gray
+            New-Item -ItemType Directory -Path $localPath -Force | Out-Null
+        }
+        
+        Write-Host ""
+        Write-Host "Starting download..." -ForegroundColor Green
+        Write-Host "(Progress will be shown. Press Ctrl+C to cancel.)" -ForegroundColor Gray
+        Write-Host ""
+        
+        $startTime = Get-Date
+        
+        # Use rsync for better progress indication (if available) or fallback to scp
+        # Check if rsync is available
+        $rsyncCheck = wsl -e bash -c "which rsync 2>/dev/null"
+        
+        if ($rsyncCheck) {
+            # Use rsync with progress
+            $rsyncCmd = "rsync -avz --progress -e 'ssh -o StrictHostKeyChecking=no -p $sshPort' root@${sshHost}:$remotePath $wslLocalPath/"
+            Write-Host "Using rsync for transfer..." -ForegroundColor Gray
+            wsl -e bash -c $rsyncCmd
+        } else {
+            # Fallback to scp
+            $scpCmd = "scp -r -o StrictHostKeyChecking=no -P $sshPort root@${sshHost}:$remotePath $wslLocalPath/"
+            Write-Host "Using scp for transfer..." -ForegroundColor Gray
+            wsl -e bash -c $scpCmd
+        }
+        
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
+            Write-Host "========================================" -ForegroundColor Green
+            Write-Host "  Model Downloaded Successfully!" -ForegroundColor Green
+            Write-Host "========================================" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "Model: $modelName" -ForegroundColor Cyan
+            Write-Host "Location: $localPath\$modelName" -ForegroundColor Cyan
+            Write-Host "Duration: $([math]::Round($duration.TotalMinutes, 1)) minutes" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "You can now use this model locally in your chat app!" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "Don't forget to stop the Vast.ai instance:" -ForegroundColor Yellow
+            Write-Host "  .\runpod.ps1 vast-stop" -ForegroundColor White
+        } else {
+            Write-Host ""
+            Write-Host "ERROR: Download failed (exit code: $LASTEXITCODE)" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "Troubleshooting:" -ForegroundColor Yellow
+            Write-Host "  - Check disk space: Get-PSDrive C" -ForegroundColor White
+            Write-Host "  - Verify model exists: .\runpod.ps1 vast-models" -ForegroundColor White
+            Write-Host "  - Try manual download: .\runpod.ps1 vast-download $remotePath" -ForegroundColor White
+        }
     }
     
     default {

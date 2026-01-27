@@ -1,0 +1,85 @@
+# Verbosity Direction Extraction Experiment
+# 
+# This config extracts a "verbosity direction" by comparing:
+# - good_prompts: Factual/closed questions (naturally get concise answers)
+# - bad_prompts: Open-ended/opinion questions (naturally get verbose answers)
+#
+# The resulting direction represents: verbose_behavior - concise_behavior
+# Removing this direction should make the model more concise.
+#
+# USAGE:
+#   heretic --model <your-model> --config experiments/verbosity/config.verbosity.toml
+#
+# NOTE: This uses the same refusal_markers for evaluation, which won't be
+# meaningful for verbosity. Use the eval_verbosity.py script instead to
+# measure actual response length changes.
+
+# Reduce trials for spike experiment
+n_trials = 50
+n_startup_trials = 15
+
+# Use shorter responses for faster iteration
+max_response_length = 150
+
+# Batch size (0 = auto)
+batch_size = 0
+
+# System prompt - keep neutral
+system_prompt = "You are a helpful assistant."
+
+# KL divergence scale - may need tuning for verbosity
+kl_divergence_scale = 1.0
+
+# CONCISE-INDUCING PROMPTS (model naturally gives short answers)
+# These become "good_prompts" - the baseline behavior
+#
+# BEFORE RUNNING: Execute the dataset creation script:
+#   python experiments/verbosity/load_local_dataset.py
+#
+[good_prompts]
+dataset = "experiments/verbosity/concise_dataset"
+split = "train"
+column = "text"
+
+# VERBOSE-INDUCING PROMPTS (model naturally elaborates)
+# These become "bad_prompts" - the behavior we want to extract/remove
+[bad_prompts]
+dataset = "experiments/verbosity/verbose_dataset"
+split = "train"
+column = "text"
+
+# Evaluation prompts - use test splits
+[good_evaluation_prompts]
+dataset = "experiments/verbosity/concise_dataset"
+split = "test"
+column = "text"
+
+[bad_evaluation_prompts]
+dataset = "experiments/verbosity/verbose_dataset"
+split = "test"
+column = "text"
+
+# Verbosity markers - words that indicate verbose behavior
+# (Used for counting, though length is the primary metric)
+refusal_markers = [
+    "in conclusion",
+    "to summarize",
+    "it's worth noting",
+    "it is worth noting",
+    "additionally",
+    "furthermore",
+    "moreover",
+    "in other words",
+    "that being said",
+    "having said that",
+    "it's important to",
+    "it is important to",
+    "let me explain",
+    "allow me to",
+    "first and foremost",
+    "last but not least",
+    "in essence",
+    "fundamentally",
+    "essentially",
+    "basically",
+]

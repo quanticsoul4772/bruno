@@ -1,4 +1,153 @@
-# Heretic RunPod Workflow
+# Heretic Cloud GPU Workflow
+
+This document covers cloud GPU deployment for heretic on RunPod and Vast.ai.
+
+---
+
+## Vast.ai CLI (heretic-vast)
+
+Heretic includes a dedicated Python CLI for Vast.ai with a rich terminal dashboard.
+
+### Installation
+
+```bash
+# Install heretic with Vast.ai support
+pip install heretic-llm fabric rich
+
+# Or if already installed
+pip install fabric rich
+```
+
+### Configuration
+
+Set your Vast.ai API key:
+
+```bash
+# Option 1: Environment variable
+export VAST_API_KEY="your-api-key"
+
+# Option 2: .env file in project directory
+echo 'VAST_API_KEY="your-api-key"' > .env
+```
+
+Get your API key from: https://cloud.vast.ai/account/
+
+### Quick Start
+
+```bash
+# See available GPU tiers
+heretic-vast tiers
+
+# Create instance (2x A100 80GB for 70B+ models)
+heretic-vast create A100_80GB 2
+
+# Install heretic on the instance
+heretic-vast setup
+
+# Run abliteration
+heretic-vast run Qwen/Qwen2.5-72B-Instruct
+
+# Monitor progress (in another terminal)
+heretic-vast watch
+
+# Stop when done (pause billing)
+heretic-vast stop
+```
+
+### GPU Tiers
+
+| Tier | VRAM | Max Price | Best For |
+|------|------|-----------|----------|
+| RTX_4090 | 24GB | $0.50/hr | 7B-8B models |
+| A6000 | 48GB | $0.80/hr | 14B-30B models |
+| A100_40GB | 40GB | $1.00/hr | 14B-32B models |
+| A100_80GB | 80GB | $2.00/hr | 32B-70B models |
+| A100_SXM | 80GB | $2.50/hr | 70B+ (fastest) |
+| H100 | 80GB | $4.00/hr | 70B+ (latest) |
+
+### Command Reference
+
+```bash
+# Instance Management
+heretic-vast create TIER [NUM_GPUS]  # Create instance
+heretic-vast list                     # List your instances
+heretic-vast start [ID]               # Start stopped instance
+heretic-vast stop [ID]                # Stop (pause billing)
+heretic-vast terminate ID             # Destroy permanently
+
+# Setup & Execution
+heretic-vast setup [ID]               # Install heretic
+heretic-vast run MODEL [ID]           # Run abliteration
+heretic-vast exec "command" [ID]      # Run any command
+heretic-vast connect [ID]             # Interactive SSH
+
+# Monitoring
+heretic-vast status [ID]              # GPU status snapshot
+heretic-vast progress [ID]            # Check abliteration progress
+heretic-vast watch [ID]               # Live dashboard (Ctrl+C to exit)
+
+# Models
+heretic-vast models [ID]              # List saved models
+heretic-vast download [MODEL] [ID]    # Download model locally
+
+# Info
+heretic-vast tiers                    # Show GPU tier info
+heretic-vast gpus TIER                # Search available GPUs
+```
+
+### Live Dashboard
+
+The `heretic-vast watch` command shows a live dashboard:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  VAST.AI ABLITERATION DASHBOARD                  │
+├─────────────────────────────────────────────────────────────────┤
+│ Instance: 12345678  │  Time: 14:32:15  │  Watch: 01:23:45       │
+├─────────────────────┬───────────────────────────────────────────┤
+│ Process             │ GPUs                                      │
+│ Status: ● RUNNING   │ GPU   Util   VRAM           Temp   Power  │
+│ Model: Qwen/Qwen2.5 │ 0     63%    69.6/80GB      45°C   250W   │
+│ Runtime: 165:33     │ 1     64%    72.7/80GB      47°C   245W   │
+│ CPU: 110%           │                                           │
+├─────────────────────┴───────────────────────────────────────────┤
+│ Output Models                                                    │
+│ (No models saved yet)                                            │
+├─────────────────────────────────────────────────────────────────┤
+│ Disk: 45G/150G (30% used)  │  Refresh: 10s  │  Ctrl+C to exit   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Model Size Guidelines
+
+| Model Size | Recommended Setup | Estimated Time |
+|------------|-------------------|----------------|
+| 7B-8B | 1x RTX_4090 | 30-45 min |
+| 14B | 1x A6000 or A100_40GB | 45-60 min |
+| 32B | 1x A100_80GB | 1-2 hours |
+| 70B-72B | 2x A100_80GB | 3-4 hours |
+
+### Troubleshooting
+
+**"fabric not installed"**
+```bash
+pip install fabric
+```
+
+**"VAST_API_KEY not set"**
+- Set environment variable or create `.env` file
+
+**"No running instance found"**
+- Run `heretic-vast list` to check instance status
+- Instance may still be starting (wait 30-60 seconds)
+
+**SSH connection fails**
+- Ensure SSH key is added to Vast.ai account
+- Check that instance is fully started
+
+---
+
+# RunPod Workflow (Alternative)
 
 ## Initial Setup (One-Time)
 
@@ -228,3 +377,47 @@ This verifies:
 - Project: https://github.com/p-e-w/heretic
 - Paper: https://arxiv.org/abs/2406.11717
 - Models: https://huggingface.co/collections/p-e-w/the-bestiary
+- Roadmap: [ROADMAP.md](ROADMAP.md)
+
+---
+
+## Running Experiments
+
+Heretic includes an experiments framework for testing new behavioral directions.
+
+### Verbosity Spike Experiment
+
+Test whether a "verbosity direction" exists and can be extracted:
+
+```bash
+# 1. Create local datasets
+python experiments/verbosity/load_local_dataset.py
+
+# 2. Copy verbosity config
+cp experiments/verbosity/config.verbosity.toml config.toml
+
+# 3. Run heretic (use Qwen - not gated)
+heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
+
+# 4. Evaluate verbosity change (use 4-bit quantization for 8GB VRAM)
+python experiments/verbosity/test_comparison_4bit.py
+```
+
+See `experiments/verbosity/README.md` for detailed instructions.
+
+### Verbosity Spike Results (Completed)
+
+The verbosity spike was run on Vast.ai (2x A100-80GB) with 50 Optuna trials.
+
+**Key Findings:**
+- ✅ Factual questions get concise responses (6-30 words)
+- ⚠️ Open-ended questions remain verbose (195-203 words)
+- The ablation reduces elaboration on simple facts but doesn't suppress natural elaboration on complex topics
+
+**Model Location:** `./models/Qwen2.5-7B-Instruct-heretic` (15.2 GB)
+
+**To test locally (requires RTX 4070 or better with 8GB+ VRAM):**
+```bash
+# Use system Python (not uv run) to ensure CUDA works
+python experiments/verbosity/test_comparison_4bit.py
+```

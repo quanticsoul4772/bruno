@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Heretic is a tool for automatic censorship removal (abliteration) from language models using Optuna-based hyperparameter optimization. It computes refusal directions from residual activations and orthogonalizes model weight matrices to reduce refusal behavior while minimizing KL divergence from the original model.
+Heretic is a tool for **neural behavior modification** in language models using activation direction analysis and Optuna-based optimization. While best known for abliteration (refusal removal), the technique is general and can extract/modify any behavioral direction encoded in model weights.
+
+**Vision:** A personal neural engineering workbench for understanding and reshaping LLM behavior at the weight level. See [ROADMAP.md](ROADMAP.md) for full vision and research directions.
 
 ## Build and Development Commands
 
@@ -31,12 +33,12 @@ uv build
 
 ### Core Flow (`src/heretic/main.py`)
 1. Load model and tokenizer via `Model` class
-2. Load good/bad prompt datasets for direction calculation
+2. Load contrastive prompt datasets (good/bad) for direction calculation
 3. Auto-detect optimal batch size if `batch_size=0`
-4. Compute per-layer refusal directions from residual activations
+4. Compute per-layer behavioral directions from residual activations
 5. Run Optuna optimization loop with TPESampler
 6. Present Pareto-optimal trials for user selection
-7. Allow saving/uploading/chatting with abliterated model
+7. Allow saving/uploading/chatting with modified model
 
 ### Key Components
 
@@ -100,6 +102,61 @@ Key parameters in `config.toml`:
 - Server runs on `0.0.0.0:7860` by default
 
 Run with: `python chat_app.py`
+
+## Vast.ai CLI (`src/heretic/vast.py`)
+
+Dedicated CLI for Vast.ai GPU cloud management:
+
+```bash
+heretic-vast create A100_80GB 2   # Create 2x A100 instance
+heretic-vast setup                 # Install heretic
+heretic-vast run MODEL             # Run abliteration
+heretic-vast watch                 # Live dashboard
+heretic-vast stop                  # Stop billing
+```
+
+### Key Components
+- `VastConfig`: Configuration from env vars / .env file
+- `GPU_TIERS`: Preset configurations for different GPU types
+- `get_connection()`: Fabric SSH connection management
+- `watch_dashboard()`: Rich live terminal dashboard
+
+### Dependencies
+- `fabric`: SSH connections
+- `rich`: Terminal UI (tables, panels, live display)
+- `click`: CLI framework
+
+## Experiments Framework
+
+Experiments for testing new behavioral directions live in `experiments/`:
+
+```
+experiments/
+└── verbosity/              # Verbosity direction spike
+    ├── README.md           # Experiment documentation
+    ├── concise_prompts.json    # Factual/closed questions (200)
+    ├── verbose_prompts.json    # Open-ended questions (200)
+    ├── config.verbosity.toml   # Heretic config for experiment
+    ├── load_local_dataset.py   # Convert JSON to HF Dataset
+    ├── eval_verbosity.py       # Measure response length changes
+    └── run_spike.ps1           # Windows automation script
+```
+
+### Running Experiments
+
+```bash
+# 1. Prepare dataset
+python experiments/verbosity/load_local_dataset.py
+
+# 2. Copy config
+cp experiments/verbosity/config.verbosity.toml config.toml
+
+# 3. Run heretic
+heretic --model meta-llama/Llama-3.1-8B-Instruct
+
+# 4. Evaluate
+python experiments/verbosity/eval_verbosity.py --original MODEL --modified OUTPUT
+```
 
 ## Testing
 

@@ -4,6 +4,7 @@
 import gc
 from dataclasses import asdict
 from importlib.metadata import version
+from pathlib import Path
 from typing import TypeVar
 
 import torch
@@ -13,7 +14,7 @@ from accelerate.utils import (
     is_sdaa_available,
     is_xpu_available,
 )
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from optuna import Trial
 from rich.console import Console
 
@@ -36,7 +37,15 @@ def format_duration(seconds: float) -> str:
 
 
 def load_prompts(specification: DatasetSpecification) -> list[str]:
-    dataset = load_dataset(specification.dataset, split=specification.split)
+    # Check if dataset is a local path (supports load_from_disk for local datasets)
+    dataset_path = Path(specification.dataset)
+    if dataset_path.exists() and dataset_path.is_dir():
+        # Local dataset saved with save_to_disk()
+        dataset_dict = load_from_disk(specification.dataset)
+        dataset = dataset_dict[specification.split]
+    else:
+        # HuggingFace Hub dataset
+        dataset = load_dataset(specification.dataset, split=specification.split)
     return list(dataset[specification.column])
 
 

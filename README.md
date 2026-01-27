@@ -1,6 +1,10 @@
-# Heretic - Automatic Censorship Removal for LLMs
+# Heretic - Neural Behavior Modification for LLMs
 
-Heretic is a tool for automatic censorship removal (abliteration) from language models using Optuna-based hyperparameter optimization.
+Heretic is a tool for surgical behavior modification in language models using activation direction analysis and Optuna-based optimization.
+
+While best known for **abliteration** (removing refusal behaviors), heretic's technique is general: it can extract and modify *any* behavioral direction encoded in model weights - verbosity, hedging, sycophancy, and more.
+
+> **Vision:** Build a personal neural engineering workbench for understanding and reshaping how language models behave at the weight level. See [ROADMAP.md](ROADMAP.md) for the full vision.
 
 ## Quick Start
 
@@ -54,18 +58,32 @@ docker run --gpus all -v heretic-cache:/workspace/.cache -it quanticsoul4772/her
 .\runpod.ps1 stop-pod           # Stop billing when done
 ```
 
-### Option 3: Vast.ai (50% Cheaper)
+### Option 3: Vast.ai CLI (Recommended for Large Models)
 
-```powershell
-# Initial setup (one-time)
-.\runpod.ps1 install-vastcli    # Install Vast.ai CLI
+Heretic includes a dedicated Python CLI for Vast.ai with a rich terminal dashboard:
 
-# Run abliteration (~$0.20/hr for RTX 4090)
-.\runpod.ps1 vast-create-pod    # Create instance
-.\runpod.ps1 vast-setup         # Install heretic
-.\runpod.ps1 vast-run Qwen/Qwen3-4B-Instruct-2507
-.\runpod.ps1 vast-stop          # Stop billing when done
+```bash
+# Install the CLI
+pip install heretic-llm
+
+# Or install with Vast.ai support
+pip install heretic-llm fabric rich
+
+# Quick start
+heretic-vast create A100_80GB 2    # Create 2x A100 80GB instance
+heretic-vast setup                  # Install heretic on instance
+heretic-vast run Qwen/Qwen2.5-72B-Instruct
+heretic-vast watch                  # Live monitoring dashboard
+heretic-vast stop                   # Stop when done
 ```
+
+**Key Features:**
+- GPU tier presets: RTX_4090, A6000, A100_40GB, A100_80GB, H100
+- Live dashboard with GPU utilization, memory, and progress
+- Automatic SSH key handling via Fabric
+- Model download from remote instances
+
+See `heretic-vast --help` for all commands.
 
 See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 
@@ -73,11 +91,13 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 
 - **Automatic optimization** - Uses Optuna for multi-objective hyperparameter tuning
 - **Early stopping** - MedianPruner stops unpromising trials early (30-40% time savings)
-- **Pareto-optimal results** - Presents best trade-offs between capability preservation and censorship removal
-- **Multi-GPU support** - Scales across available GPUs
+- **Pareto-optimal results** - Presents best trade-offs between capability preservation and behavior modification
+- **Multi-GPU support** - Scales across available GPUs with `device_map="auto"`
 - **HuggingFace integration** - Direct upload to your HF account
 - **Fully automated mode** - `--auto-select` + `--hf-upload` for headless operation
-- **Chat interface** - Gradio-based UI for interacting with abliterated models
+- **Chat interface** - Gradio-based UI for interacting with modified models
+- **Cloud CLI** - `heretic-vast` for Vast.ai GPU management with live dashboard
+- **Experiments framework** - Infrastructure for testing new behavioral directions
 
 ## Requirements
 
@@ -151,11 +171,23 @@ kl_threshold = 1.0      # Max acceptable KL divergence
 
 ## How It Works
 
-1. **Load model** - Loads the target model with automatic dtype selection
-2. **Extract refusal directions** - Computes per-layer activation patterns from harmful vs. benign prompts
-3. **Optimize ablation** - Uses Optuna to find optimal ablation parameters that minimize refusals while preserving model capabilities (measured by KL divergence)
+1. **Load model** - Loads the target model with automatic dtype selection and multi-GPU distribution
+2. **Extract behavioral directions** - Computes per-layer activation patterns from contrastive prompt pairs
+3. **Optimize modification** - Uses Optuna to find optimal parameters that modify behavior while preserving capabilities (measured by KL divergence)
 4. **Select result** - Presents Pareto-optimal trials for user selection
 5. **Export** - Save locally or upload to HuggingFace
+
+### The Core Technique
+
+Heretic uses **activation direction analysis** to find and remove behavioral tendencies:
+
+```
+1. FIND direction    → Compare activations on contrastive prompts
+2. PROJECT it out    → Orthogonalize weight matrices against that direction  
+3. OPTIMIZE          → Find intensity that modifies behavior without destroying capability
+```
+
+This technique is general - it works for any behavior encoded as a direction in activation space.
 
 ## Chat Interface
 
@@ -250,12 +282,29 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 }
 ```
 
+## Experiments
+
+Heretic includes an experiments framework for testing new behavioral directions:
+
+```
+experiments/
+└── verbosity/          # Test extraction of "verbosity direction"
+    ├── README.md       # Experiment documentation
+    ├── concise_prompts.json
+    ├── verbose_prompts.json
+    ├── config.verbosity.toml
+    └── eval_verbosity.py
+```
+
+See [ROADMAP.md](ROADMAP.md) for research directions and future plans.
+
 ## License
 
 AGPL-3.0-or-later
 
 ## Resources
 
-- [Paper](https://arxiv.org/abs/2406.11717)
-- [Abliterated Models](https://huggingface.co/collections/p-e-w/the-bestiary)
-- [Documentation](knowledge.md)
+- [Paper: Refusal in Language Models Is Mediated by a Single Direction](https://arxiv.org/abs/2406.11717)
+- [Abliterated Models Collection](https://huggingface.co/collections/p-e-w/the-bestiary)
+- [Project Roadmap](ROADMAP.md)
+- [Vast.ai Workflow](WORKFLOW.md)
