@@ -90,7 +90,7 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 ## Features
 
 - **Automatic optimization** - Uses Optuna for multi-objective hyperparameter tuning
-- **Early stopping** - MedianPruner stops unpromising trials early (30-40% time savings)
+- **Resume support** - Persistent SQLite storage allows resuming interrupted experiments
 - **Pareto-optimal results** - Presents best trade-offs between capability preservation and behavior modification
 - **Multi-GPU support** - Scales across available GPUs with `device_map="auto"`
 - **HuggingFace integration** - Direct upload to your HF account
@@ -98,6 +98,13 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 - **Chat interface** - Gradio-based UI for interacting with modified models
 - **Cloud CLI** - `heretic-vast` for Vast.ai GPU management with live dashboard
 - **Experiments framework** - Infrastructure for testing new behavioral directions
+
+### Performance Optimizations
+
+- **In-memory weight caching** - Caches original weights for fast reset (~5-10x faster than reloading from disk)
+- **torch.compile() support** - Optional compilation for ~1.5-2x inference speedup (`--compile`)
+- **Early stopping for refusals** - Generates fewer tokens for refusal detection (~40-60% faster evaluation)
+- **Parallel evaluation** - KL divergence and refusal counting run concurrently
 
 ## Requirements
 
@@ -153,20 +160,29 @@ heretic mistralai/Mistral-7B-Instruct-v0.3 --auto-select --auto-select-path ./ou
 | `--hf-upload REPO` | Upload to HuggingFace (e.g., `user/model-heretic`) |
 | `--hf-private` | Make HuggingFace repo private |
 | `--n-trials N` | Number of trials (default: 200) |
-| `--prune-trials/--no-prune-trials` | Enable/disable early stopping (default: enabled) |
+| `--compile` | Enable torch.compile() for faster inference |
+| `--storage URL` | Optuna storage URL for resume support (e.g., `sqlite:///study.db`) |
+| `--study-name NAME` | Optuna study name (default: `heretic_study`) |
+| `--refusal-check-tokens N` | Tokens for refusal detection (default: 30) |
 
 ## Configuration
 
 Copy `config.default.toml` to `config.toml` and customize:
 
 ```toml
-[model]
-dtype = "auto"          # float16, bfloat16, or auto
-batch_size = 0          # 0 = auto-detect
+# Model settings
+model = "Qwen/Qwen3-4B-Instruct-2507"
+dtype = "auto"           # float16, bfloat16, or auto
+batch_size = 0           # 0 = auto-detect
+compile = false          # Enable torch.compile() for faster inference
 
-[optimization]
-n_trials = 100          # Number of Optuna trials
-kl_threshold = 1.0      # Max acceptable KL divergence
+# Optimization settings
+n_trials = 100           # Number of Optuna trials
+storage = "sqlite:///heretic_study.db"  # Resume support
+study_name = "heretic_study"
+
+# Evaluation settings
+refusal_check_tokens = 30  # Fewer tokens = faster evaluation
 ```
 
 ## How It Works

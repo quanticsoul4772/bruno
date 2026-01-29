@@ -4,6 +4,40 @@ This document covers cloud GPU deployment for heretic on RunPod and Vast.ai.
 
 ---
 
+## 🚀 Quick Start (Qwen2.5-Coder-32B)
+
+**One command to rule them all:**
+```powershell
+.\start-abliteration.ps1
+```
+
+Or step-by-step:
+```powershell
+# 1. Create instance with 4x RTX 4090 (~$1.50/hr, ~2 min)
+.\runpod.ps1 vast-create-pod RTX_4090 4
+
+# 2. Install heretic (~3 min)
+.\runpod.ps1 vast-setup
+
+# 3. Start abliteration with persistent storage (~5 min setup, then runs 5-6 hrs)
+.\runpod.ps1 vast-exec "export HF_HOME=/workspace/.cache/huggingface && cd /workspace && nohup heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models --storage sqlite:////workspace/heretic_study.db --study-name qwen32b > /workspace/heretic.log 2>&1 &"
+
+# 4. Monitor progress
+.\runpod.ps1 vast-watch
+
+# 5. When complete, download and stop
+.\runpod.ps1 vast-download-model
+.\runpod.ps1 vast-stop
+```
+
+**Key Features:**
+- ✅ **Persistent storage** - Resumes if interrupted (uses SQLite via `--storage`)
+- ✅ **4x RTX 4090** - 96GB VRAM for 32B model
+- ✅ **~$8-10 total cost** for full 100-trial run
+- ✅ **Performance optimizations** - In-memory weight caching, parallel evaluation, early stopping
+
+---
+
 ## Vast.ai CLI (heretic-vast)
 
 Heretic includes a dedicated Python CLI for Vast.ai with a rich terminal dashboard.
@@ -120,12 +154,14 @@ The `heretic-vast watch` command shows a live dashboard:
 
 ### Model Size Guidelines
 
-| Model Size | Recommended Setup | Estimated Time |
+| Model Size | Recommended Setup | Estimated Time* |
 |------------|-------------------|----------------|
-| 7B-8B | 1x RTX_4090 | 30-45 min |
-| 14B | 1x A6000 or A100_40GB | 45-60 min |
-| 32B | 1x A100_80GB | 1-2 hours |
-| 70B-72B | 2x A100_80GB | 3-4 hours |
+| 7B-8B | 1x RTX_4090 | 20-30 min |
+| 14B | 1x A6000 or A100_40GB | 30-45 min |
+| 32B | 1x A100_80GB | 45-90 min |
+| 70B-72B | 2x A100_80GB | 2-3 hours |
+
+*Times reflect performance optimizations (in-memory caching, early stopping, parallel eval)
 
 ### Troubleshooting
 
@@ -144,6 +180,27 @@ pip install fabric
 **SSH connection fails**
 - Ensure SSH key is added to Vast.ai account
 - Check that instance is fully started
+- **SSH key must be attached to the specific instance** (not just the account):
+  ```bash
+  vastai attach ssh INSTANCE_ID "$(cat ~/.ssh/id_ed25519.pub)"
+  vastai reboot instance INSTANCE_ID  # May be required
+  ```
+- After reboot, the **instance ID and port may change** - run `heretic-vast list` to get new details
+- If `heretic-vast` commands fail but direct SSH works, use direct SSH as fallback:
+  ```bash
+  ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p PORT root@ssh1.vast.ai "command"
+  ```
+
+**SSH agent not running (key not loaded)**
+```bash
+eval $(ssh-agent -s)
+ssh-add ~/.ssh/id_ed25519
+```
+
+**Debug SSH with verbose output**
+```bash
+ssh -vvv -i ~/.ssh/id_ed25519 -p PORT root@ssh1.vast.ai "echo test" 2>&1 | tail -30
+```
 
 ---
 

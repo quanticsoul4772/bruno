@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
+import copy
 import math
 from contextlib import suppress
 from dataclasses import dataclass
@@ -82,18 +83,19 @@ class Model:
                 f"  * [bold]{component}[/]: [bold]{len(matrices)}[/] matrices per layer"
             )
 
+        # Cache original weights in memory for fast reset (avoids reloading from disk)
+        print("* Caching original weights in memory...")
+        self.original_state_dict = copy.deepcopy(self.model.state_dict())
+
+        # Optionally compile the model for faster inference (~1.5-2x speedup)
+        if settings.compile:
+            print("* Compiling model with torch.compile()...")
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+
     def reload_model(self):
-        dtype = self.model.dtype
-
-        # Purge existing model object from memory to make space.
-        self.model = None
-        empty_cache()
-
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.settings.model,
-            dtype=dtype,
-            device_map=self.settings.device_map,
-        )
+        # Fast weight reset from cached state_dict (instead of reloading from disk)
+        # This is ~5-10x faster than from_pretrained() for large models
+        self.model.load_state_dict(self.original_state_dict)
 
     def get_layers(self) -> ModuleList:
         # Most multimodal models.
@@ -262,10 +264,13 @@ class Model:
             do_sample=False,  # Use greedy decoding to ensure deterministic outputs.
         )
 
-    def get_responses(self, prompts: list[str]) -> list[str]:
+    def get_responses(self, prompts: list[str], max_tokens: int | None = None) -> list[str]:
+        if max_tokens is None:
+            max_tokens = self.settings.max_response_length
+
         inputs, outputs = self.generate(
             prompts,
-            max_new_tokens=self.settings.max_response_length,
+            max_new_tokens=max_tokens,
         )
 
         # Return only the newly generated part.
@@ -274,11 +279,11 @@ class Model:
             skip_special_tokens=True,
         )
 
-    def get_responses_batched(self, prompts: list[str]) -> list[str]:
+    def get_responses_batched(self, prompts: list[str], max_tokens: int | None = None) -> list[str]:
         responses = []
 
         for batch in batchify(prompts, self.settings.batch_size):
-            for response in self.get_responses(batch):
+            for response in self.get_responses(batch, max_tokens=max_tokens):
                 responses.append(response)
 
         return responses

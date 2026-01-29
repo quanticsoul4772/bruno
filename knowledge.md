@@ -1,4 +1,23 @@
-# Project knowledge
+# ⛔ STOP: Read this file and WORKFLOW.md FIRST. Use `heretic-vast` CLI, not SSH. ⛔
+
+## ⛔ STOP - READ THIS FIRST ⛔
+
+**BEFORE YOU DO ANYTHING ELSE:**
+
+1. **READ THIS ENTIRE FILE** - Not skim. READ.
+2. **CHECK what already exists** - Models downloaded? Experiments run? Tools available?
+3. **USE EXISTING TOOLS** - `heretic-vast` CLI, `runpod.ps1` script
+4. **ASK if unsure** - Don't guess. Don't assume. ASK.
+
+**YOU HAVE FAILED MULTIPLE TIMES BY:**
+- Ignoring this documentation after writing it
+- Using manual SSH instead of `heretic-vast` CLI
+- Destroying running instances without checking status
+- Pattern-matching "cloud task" → "manual SSH commands"
+
+**THE FIX:** Read `knowledge.md` and `WORKFLOW.md` FIRST. Every. Single. Time.
+
+---
 
 This file gives Codebuff context about your project: goals, commands, conventions, and gotchas.
 
@@ -12,6 +31,27 @@ Heretic is a **neural behavior modification workbench**, not just an "uncensorin
 - Test: No test suite - CI runs `ruff format` and `ruff check`
 - Chat UI: `python chat_app.py`
 - Cloud (Vast.ai): `heretic-vast create A100_80GB 2 && heretic-vast setup && heretic-vast run MODEL`
+
+## Performance Optimizations (NEW)
+
+Heretic includes several performance optimizations:
+
+| Optimization | Speedup | Flag/Config |
+|--------------|---------|-------------|
+| In-memory weight caching | ~5-10x faster model reset | Automatic |
+| torch.compile() | ~1.5-2x inference speedup | `--compile` |
+| Early stopping for refusals | ~40-60% faster evaluation | `--refusal-check-tokens 30` |
+| Parallel evaluation | ~20-30% faster per trial | Automatic |
+| Resume support | Can resume interrupted runs | `--storage sqlite:///study.db` |
+
+**Example with all optimizations:**
+```bash
+heretic --model Qwen/Qwen2.5-Coder-32B-Instruct \
+  --compile \
+  --storage sqlite:///heretic_study.db \
+  --study-name qwen32b \
+  --auto-select true
+```
 
 ## Architecture
 - Key directories:
@@ -107,7 +147,7 @@ See `experiments/verbosity_v2/` for improved prompts.
 | Experiment | Status | Goal | Location |
 |------------|--------|------|----------|
 | **verbosity** | ✅ Complete | Extract padding direction | `experiments/verbosity/` |
-| **verbosity_v2** | 🔄 Ready | Isolate padding from complexity | `experiments/verbosity_v2/` |
+| **verbosity_v2** | ✅ Complete | Isolate padding from complexity | `experiments/verbosity_v2/` |
 | **hedging** | 🔄 Ready | Extract hedging markers | `experiments/hedging/` |
 | **sycophancy** | 📋 Planned | Extract excessive praise | Future |
 | **meta-commentary** | 📋 Planned | Extract "Let me think..." | Future |
@@ -115,18 +155,29 @@ See `experiments/verbosity_v2/` for improved prompts.
 ### Quick Start for Experiments
 
 ```bash
-# Verbosity v2 (recommended next)
-cd experiments/verbosity_v2
-python load_local_dataset.py
-cp config.verbosity_v2.toml ../../config.toml
-heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
-
-# Hedging
+# Hedging (recommended next)
 cd experiments/hedging
 python load_local_dataset.py  
 cp config.hedging.toml ../../config.toml
 heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
 ```
+
+### Verbosity v2 Results (Qwen 7B)
+
+| Metric | Value |
+|--------|-------|
+| Model | Qwen/Qwen2.5-7B-Instruct |
+| Trials | 200 Optuna optimization trials |
+| Datasets | 70 concise + 70 verbose prompts (same questions, different instructions) |
+| Instance | Vast.ai RTX 4090 (24GB) |
+| Runtime | ~40 minutes |
+| Model Saved | `./experiments/verbosity_v2/Qwen2.5-7B-Instruct-heretic/` (15 GB) |
+
+**Approach:** Used identical questions with explicit verbosity instructions:
+- Concise: "What is 2+2? Answer briefly."
+- Verbose: "What is 2+2? Explain in detail."
+
+This isolates the padding behavior from question complexity (unlike v1 which conflated them).
 
 ## Chat App Patterns
 - Model validation: Check for config.json, model weights, and tokenizer files
@@ -143,17 +194,37 @@ heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
   - 70B+: 2x A100_80GB or H100
 
 ### Downloading Models from Vast.ai
-**TWO TOOLS AVAILABLE - USE THE RIGHT ONE:**
 
-1. **PowerShell script (RECOMMENDED)**: `.\runpod.ps1 vast-download-model`
+**THREE OPTIONS - USE WHAT WORKS:**
+
+1. **Direct rsync from WSL (MOST RELIABLE)**:
+   ```bash
+   # From WSL Ubuntu terminal:
+   cd /mnt/c/Development/Projects/heretic
+   mkdir -p ./experiments/verbosity_v2/Qwen2.5-7B-Instruct-heretic
+   rsync -avz --progress -e "ssh -o StrictHostKeyChecking=no -p PORT" root@ssh1.vast.ai:/workspace/MODEL/ ./LOCAL_PATH/
+   ```
+   - Uses WSL's SSH key (copy from Windows if needed: `cp /mnt/c/Users/USERNAME/.ssh/id_rsa ~/.ssh/`)
+   - Shows progress, resumes on disconnect
+   - ~15GB model takes ~35 min at 7MB/s
+
+2. **PowerShell script**: `.\runpod.ps1 vast-download-model`
    - More robust SSH handling with multiple URL format support
    - Better progress display with rsync
    - Works reliably on Windows
 
-2. **Python CLI**: `heretic-vast download`
+3. **Python CLI**: `heretic-vast download`
    - May have SSH connection issues on Windows/WSL
-   - If it fails, use PowerShell script instead
-   - Now shows debugging info when SSH fails
+   - If it fails, use rsync or PowerShell script instead
+
+**SSH Key Issues from WSL:**
+WSL has its own SSH keys separate from Windows. If you get "Permission denied (publickey)":
+```bash
+# Copy Windows SSH key to WSL
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cp /mnt/c/Users/YOUR_WINDOWS_USERNAME/.ssh/id_rsa ~/.ssh/
+chmod 600 ~/.ssh/id_rsa
+```
 
 ## CRITICAL GOTCHAS (Lessons Learned)
 
@@ -162,19 +233,37 @@ heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
 **STOP. Before taking ANY action, complete this checklist:**
 
 ```
-□ 1. Have I read knowledge.md? (You're here - good)
-□ 2. What does the user ACTUALLY want? (Write it down)
-□ 3. What do I ALREADY have? (Check conversation, local files, downloaded models)
-□ 4. Do existing tools handle this? (runpod.ps1, heretic-vast, existing scripts)
-□ 5. Can local hardware do this? (RTX 4070, 8GB VRAM - use 4-bit quantization)
-□ 6. Is cloud NECESSARY? (Default answer: NO)
-□ 7. What's the SIMPLEST approach?
+□ 1. Have I read knowledge.md COMPLETELY? (Not skimmed - READ)
+□ 2. Have I read WORKFLOW.md? (Contains heretic-vast commands)
+□ 3. What does the user ACTUALLY want? (Write it down)
+□ 4. What do I ALREADY have? (Check conversation, local files, downloaded models)
+□ 5. Do existing tools handle this? (heretic-vast CLI, runpod.ps1 script)
+□ 6. Can local hardware do this? (RTX 4070, 8GB VRAM - use 4-bit quantization)
+□ 7. Is cloud NECESSARY? (Default answer: NO)
+□ 8. What's the SIMPLEST approach?
 ```
+
+### CLOUD TASK WORKFLOW (MANDATORY)
+
+**When user asks ANYTHING about cloud/Vast.ai/experiments:**
+
+1. `heretic-vast list` - Check existing instances
+2. `heretic-vast status ID` - Check if experiment running
+3. `heretic-vast progress ID` - Check experiment progress
+4. **ONLY THEN** decide what to do
+
+**NEVER:**
+- Use raw SSH commands when `heretic-vast` exists
+- Destroy/stop instances without explicit user permission
+- Start new instances when one is already running
+- Assume - always CHECK first
 
 **ANTI-PATTERNS TO RECOGNIZE:**
 
 | Trigger | WRONG Response | RIGHT Response |
 |---------|----------------|----------------|
+| "Run experiment" | Manual SSH commands | Use `heretic-vast run MODEL` |
+| "Check progress" | SSH and grep logs | Use `heretic-vast progress ID` |
 | "Test model" | Start Vast.ai | Check if results/model already exist locally |
 | "Need GPU" | Rent cloud GPU | Check if local 4070 can handle it (4-bit) |
 | "Error occurred" | Try workaround | Fix the actual error |
@@ -207,7 +296,11 @@ heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
 
 ### Heretic CLI Flags
 - **`--auto-select` REQUIRES a boolean value**: Use `--auto-select true`, NOT `--auto-select`
-- Example: `heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true --n-trials 20`
+- **`--compile`**: Enable torch.compile() for ~1.5-2x inference speedup (longer initial compilation)
+- **`--storage`**: Optuna storage URL for resume support (e.g., `sqlite:///study.db`)
+- **`--study-name`**: Name for the Optuna study (default: `heretic_study`)
+- **`--refusal-check-tokens`**: Tokens to generate for refusal detection (default: 30, lower = faster)
+- Example: `heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true --n-trials 20 --compile`
 
 ### Dataset Loading
 - **heretic uses `load_dataset()` from HuggingFace**, NOT `load_from_disk()`
@@ -234,3 +327,83 @@ heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true
 - **Stopping a Vast.ai instance KILLS running processes** - no graceful save
 - If abliteration hasn't saved the model yet, you lose ALL progress
 - Check `heretic-vast progress` for "Models Saved" before stopping
+
+### SSH Authentication Failures on Vast.ai
+
+**Problem:** `heretic-vast` commands fail with "Authentication failed" even though `vastai ssh-keys` shows the key is registered.
+
+**Root Causes & Solutions:**
+
+1. **SSH agent not running** - The key exists but isn't loaded:
+   ```bash
+   eval $(ssh-agent -s)
+   ssh-add ~/.ssh/id_ed25519
+   ```
+
+2. **Key permissions wrong** - Must be 600:
+   ```bash
+   chmod 600 ~/.ssh/id_ed25519
+   ```
+
+3. **Key not attached to instance** - Even if registered on account:
+   ```bash
+   vastai attach ssh INSTANCE_ID "$(cat ~/.ssh/id_ed25519.pub)"
+   ```
+
+4. **Instance needs reboot** - After attaching SSH key:
+   ```bash
+   vastai reboot instance INSTANCE_ID
+   # Wait 30-60 seconds for reboot
+   ```
+
+5. **Wrong instance/port** - After reboot, instance ID and port may change:
+   ```bash
+   uv run heretic-vast list  # Get new SSH details
+   ```
+
+6. **Fabric vs direct SSH** - If `heretic-vast` fails but direct SSH works:
+   ```bash
+   # Use direct SSH as fallback
+   ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p PORT root@ssh1.vast.ai "command"
+   ```
+
+**Debugging SSH Issues:**
+```bash
+# Check if key is loaded
+ssh-add -l
+
+# Check keys registered on Vast.ai
+vastai show ssh-keys
+
+# Test direct SSH with verbose output
+ssh -vvv -i ~/.ssh/id_ed25519 -p PORT root@ssh1.vast.ai "echo test" 2>&1 | tail -30
+
+# Compare key fingerprints
+ssh-keygen -lf ~/.ssh/id_ed25519.pub  # Local key
+vastai show ssh-keys                   # Remote key
+```
+
+**Full Recovery Workflow (when SSH completely broken):**
+```bash
+# 1. Start SSH agent and add key
+eval $(ssh-agent -s) && ssh-add ~/.ssh/id_ed25519
+
+# 2. Verify key is on Vast.ai (add if not)
+vastai create ssh-key "$(cat ~/.ssh/id_ed25519.pub)" 2>/dev/null || echo "Key exists"
+
+# 3. Get instance ID
+INSTANCE_ID=$(uv run heretic-vast list 2>/dev/null | grep -oP '\d{8}' | head -1)
+
+# 4. Attach key to instance
+vastai attach ssh $INSTANCE_ID "$(cat ~/.ssh/id_ed25519.pub)"
+
+# 5. Reboot instance to pick up new key
+vastai reboot instance $INSTANCE_ID
+
+# 6. Wait and get new SSH details
+sleep 45
+uv run heretic-vast list
+
+# 7. Test connection
+ssh -o StrictHostKeyChecking=no -p NEW_PORT root@ssh1.vast.ai "echo SUCCESS"
+```

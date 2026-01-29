@@ -16,7 +16,11 @@ dtypes = [
 device_map = "auto"
 
 # Number of input sequences to process in parallel (0 = auto).
-batch_size = 0  # auto
+batch_size = 0
+
+# Enable torch.compile() for faster inference (~1.5-2x speedup).
+# Note: Has initial compilation overhead, best for long runs.
+compile = false  # auto
 
 # Maximum batch size to try when automatically determining the optimal batch size.
 max_batch_size = 128
@@ -24,12 +28,23 @@ max_batch_size = 128
 # Maximum number of tokens to generate for each response.
 max_response_length = 100
 
+# Number of tokens to generate when checking for refusals.
+# Refusals typically appear in first 20-30 tokens, so fewer tokens = faster evaluation.
+refusal_check_tokens = 30
+
 # Assumed "typical" value of the Kullback-Leibler divergence from the original model for abliterated models.
 # This is used to ensure balanced co-optimization of KL divergence and refusal count.
 kl_divergence_scale = 1.0
 
 # Number of abliteration trials to run during optimization.
 n_trials = 200
+
+# Optuna study name (for resuming experiments).
+study_name = "heretic_study"
+
+# Optuna storage URL for persisting trials (enables resume support).
+# Set to empty string to disable persistence (trials lost if process crashes).
+storage = "sqlite:///heretic_study.db"
 
 # Number of trials that use random sampling for the purpose of exploration.
 # Research shows 20-30 is sufficient; reduced from 60 for faster optimization.

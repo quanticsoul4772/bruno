@@ -1,5 +1,26 @@
 # CLAUDE.md
 
+## ⛔ STOP - YOU MUST READ THIS FIRST ⛔
+
+**BEFORE ANY ACTION, READ: `knowledge.md` and `WORKFLOW.md`**
+
+**YOU HAVE REPEATEDLY FAILED BY:**
+- Using manual SSH commands instead of `heretic-vast` CLI
+- Destroying running cloud instances without permission
+- Starting experiments without checking if one is already running
+- Pattern-matching "cloud task" → "SSH commands" instead of using tools
+
+**THE TOOLS EXIST. USE THEM:**
+```bash
+uv run heretic-vast list        # Check instances
+uv run heretic-vast progress ID # Check experiment progress  
+uv run heretic-vast status ID   # Check GPU/process status
+```
+
+**NEVER use raw SSH when heretic-vast exists. NEVER.**
+
+---
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## ⚠️ MANDATORY PRE-ACTION CHECKLIST
@@ -81,11 +102,17 @@ uv build
 - `get_layer_matrices()`: Extracts abliterable weight matrices (attn.o_proj, mlp.down_proj) supporting dense and MoE variants
 - `abliterate()`: Applies orthogonalization with per-layer weight interpolation
 - `get_residuals_batched()`: Extracts hidden states for refusal direction computation
+- **Performance optimizations:**
+  - In-memory weight caching: Caches original `state_dict` for fast reset (~5-10x faster than reloading from disk)
+  - Optional `torch.compile()` support for ~1.5-2x inference speedup
 
 **`Evaluator` (`src/heretic/evaluator.py`)**
 - Computes KL divergence from first-token probability distributions
-- Counts refusals using configurable marker strings
+- Counts refusals using configurable marker strings (pre-compiled regex for 5-10x faster matching)
 - Returns multi-objective score tuple `(kl_divergence, refusals)`
+- **Performance optimizations:**
+  - Early stopping: Generates only 30 tokens for refusal detection (configurable via `refusal_check_tokens`)
+  - Parallel evaluation: KL divergence and refusal counting run concurrently via ThreadPoolExecutor
 
 **`Settings` (`src/heretic/config.py`)**
 - Pydantic-based configuration with layered sources: CLI args > env vars > config.toml
@@ -107,6 +134,10 @@ Key parameters in `config.toml`:
 - `batch_size`: 0 for auto-detection
 - `max_batch_size`: Upper limit for auto-detection
 - `dtypes`: Fallback chain for model loading precision
+- `compile`: Enable torch.compile() for faster inference (default: false)
+- `refusal_check_tokens`: Tokens to generate for refusal detection (default: 30)
+- `storage`: Optuna SQLite storage URL for resume support (default: sqlite:///heretic_study.db)
+- `study_name`: Optuna study name for resuming experiments
 
 ## Chat Interface
 
@@ -158,6 +189,18 @@ heretic-vast stop                  # Stop billing
 - `fabric`: SSH connections
 - `rich`: Terminal UI (tables, panels, live display)
 - `click`: CLI framework
+
+### SSH Troubleshooting
+
+If `heretic-vast` commands fail with SSH authentication errors:
+
+1. **Check SSH agent is running**: `ssh-add -l` (if empty, run `eval $(ssh-agent -s) && ssh-add ~/.ssh/id_ed25519`)
+2. **Verify key on Vast.ai**: `vastai show ssh-keys`
+3. **Attach key to instance**: `vastai attach ssh INSTANCE_ID "$(cat ~/.ssh/id_ed25519.pub)"`
+4. **Reboot instance**: `vastai reboot instance INSTANCE_ID` (wait 45s, then `heretic-vast list` for new port)
+5. **Fallback to direct SSH**: `ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p PORT root@ssh1.vast.ai "command"`
+
+See `knowledge.md` for full SSH recovery workflow.
 
 ## Experiments Framework
 

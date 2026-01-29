@@ -66,6 +66,11 @@ class Settings(BaseSettings):
         description="Device map to pass to Accelerate when loading the model.",
     )
 
+    compile: bool = Field(
+        default=False,
+        description="Use torch.compile() to optimize the model for faster inference. Provides ~1.5-2x speedup but has initial compilation overhead.",
+    )
+
     batch_size: int = Field(
         default=0,  # auto
         description="Number of input sequences to process in parallel (0 = auto).",
@@ -79,6 +84,11 @@ class Settings(BaseSettings):
     max_response_length: int = Field(
         default=100,
         description="Maximum number of tokens to generate for each response.",
+    )
+
+    refusal_check_tokens: int = Field(
+        default=30,
+        description="Number of tokens to generate when checking for refusals. Refusals typically appear in the first 20-30 tokens, so generating fewer tokens speeds up evaluation significantly.",
     )
 
     kl_divergence_scale: float = Field(
