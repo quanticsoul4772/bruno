@@ -4,7 +4,6 @@
 """Unit tests for structured logging module."""
 
 import os
-import pytest
 from unittest.mock import patch
 
 
