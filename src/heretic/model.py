@@ -207,6 +207,15 @@ class Model:
             i: self.get_layer_matrices(i) for i in range(num_layers)
         }
 
+        # Pre-allocate projectors per device to avoid repeated .to() allocations
+        # This prevents memory accumulation that causes OOM on multi-GPU setups
+        device_projectors_cache: dict[torch.device, Tensor] = {}
+        
+        def get_device_projector(projector: Tensor, device: torch.device) -> Tensor:
+            if device not in device_projectors_cache:
+                device_projectors_cache[device] = projector.to(device)
+            return device_projectors_cache[device]
+
         # Note that some implementations of abliteration also orthogonalize
         # the embedding matrix, but it's unclear if that has any benefits.
         for layer_index in range(num_layers):
@@ -238,12 +247,18 @@ class Model:
                         layer_refusal_direction,
                         layer_refusal_direction,
                     ).to(self.model.dtype)
+                    # Clear the per-layer projector cache since projector changed
+                    device_projectors_cache.clear()
 
                 for matrix in matrices:
-                    # Ensure projector is on the same device as the matrix for multi-GPU support.
-                    device_projector = projector.to(matrix.device)
+                    # Reuse cached projector per device to prevent memory accumulation
+                    device_projector = get_device_projector(projector, matrix.device)
                     # In-place subtraction is safe as we're not using Autograd.
                     matrix.sub_(weight * (device_projector @ matrix))
+            
+            # Clear CUDA cache periodically to prevent memory fragmentation
+            if layer_index % 8 == 7:
+                empty_cache()
 
     def get_chat(self, prompt: str) -> list[dict[str, str]]:
         return [
