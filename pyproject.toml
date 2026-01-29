@@ -39,6 +39,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.14.5",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
 ]
 
 [project.urls]
@@ -58,3 +61,21 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "heretic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--cov=src/heretic --cov-report=term-missing"
+markers = [
+    "slow: marks tests as slow (deselect with '-m not slow')",
+    "integration: marks integration tests",
+    "gpu: marks tests requiring GPU",
+]
+
+[tool.coverage.run]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+# Start with low threshold until more tests are added
+# Target: 70% coverage after completing IMPLEMENTATION_PLAN.md Task 1.1
+fail_under = 10
