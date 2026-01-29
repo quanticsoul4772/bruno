@@ -34,3 +34,7 @@ abliterated-qwen2.5-7b/
 *.tar.gz
 temp_config.toml
 nul
+
+# Log files (can get very large)
+*.log
+heretic.log
