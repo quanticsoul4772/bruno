@@ -293,8 +293,11 @@ def run():
 
         # Note: trial.report() and trial.should_prune() are not supported for multi-objective
         # optimization in Optuna. Pruning is disabled for now.
-        # TODO: Consider switching to single-objective optimization with weighted score
-        # if pruning is critical for performance.
+        # 
+        # Design note: Switching to single-objective optimization with a weighted score
+        # would enable pruning (~30% compute savings), but at the cost of losing the
+        # Pareto front diversity. The current multi-objective approach is preferred
+        # because it gives users more choices among different refusal/KL trade-offs.
 
         elapsed_time = time.perf_counter() - start_time
         remaining_time = (elapsed_time / trial_index) * (

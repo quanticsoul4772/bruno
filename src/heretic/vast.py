@@ -87,6 +87,44 @@ MIN_DOWNLOAD_SPEED = 200
 MODELS_DIR = "/workspace/models"
 
 
+# Regex pattern for valid API keys (alphanumeric, hyphens, underscores only)
+# This prevents command injection when passing keys through shell (especially WSL)
+API_KEY_PATTERN = re.compile(r'^[A-Za-z0-9_-]+$')
+
+
+class APIKeyValidationError(ValueError):
+    """Raised when an API key contains invalid characters."""
+    pass
+
+
+def validate_api_key(api_key: str) -> bool:
+    """Validate that an API key contains only safe characters.
+    
+    This prevents command injection vulnerabilities when the API key
+    is passed through shell commands (especially via WSL).
+    
+    Args:
+        api_key: The API key to validate.
+        
+    Returns:
+        True if valid, raises APIKeyValidationError if invalid.
+        
+    Raises:
+        APIKeyValidationError: If the API key contains shell metacharacters.
+    """
+    if not api_key:
+        return True  # Empty keys are allowed (will fail later with clear message)
+    
+    if not API_KEY_PATTERN.match(api_key):
+        raise APIKeyValidationError(
+            "VAST_API_KEY contains invalid characters. "
+            "Only alphanumeric characters, hyphens, and underscores are allowed. "
+            "This prevents command injection when using WSL."
+        )
+    
+    return True
+
+
 @dataclass
 class VastConfig:
     """Configuration for Vast.ai connection."""
@@ -98,7 +136,11 @@ class VastConfig:
 
     @classmethod
     def from_env(cls) -> "VastConfig":
-        """Load configuration from environment variables and .env file."""
+        """Load configuration from environment variables and .env file.
+        
+        Raises:
+            APIKeyValidationError: If VAST_API_KEY contains shell metacharacters.
+        """
         # Try to load from .env file first
         env_file = Path(".env")
         if env_file.exists():
@@ -112,6 +154,10 @@ class VastConfig:
                         os.environ.setdefault(key, value)
 
         api_key = os.environ.get("VAST_API_KEY", "")
+        
+        # SECURITY: Validate API key format to prevent command injection
+        validate_api_key(api_key)
+        
         return cls(
             api_key=api_key,
             local_models_dir=os.environ.get("LOCAL_MODELS_DIR", "./models"),
@@ -317,11 +363,15 @@ def get_connection(instance_id: str, config: VastConfig) -> Optional["Connection
 
 
 def run_ssh_command(conn: "Connection", command: str, hide: bool = True) -> str:
-    """Run a command via SSH and return stdout."""
+    """Run a command via SSH and return stdout.
+    
+    Returns empty string on connection errors (network issues, timeouts, etc.).
+    """
     try:
         result = conn.run(command, hide=hide, warn=True)
         return result.stdout if result and result.ok else ""
-    except Exception:
+    except (OSError, TimeoutError, EOFError):
+        # Connection errors: socket issues, timeouts, connection closed
         return ""
 
 
@@ -845,7 +895,8 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
             )
             models = run_ssh_command(conn, f"ls -1 {MODELS_DIR}/ 2>/dev/null | head -5")
             disk = run_ssh_command(conn, "df -h /workspace 2>/dev/null | tail -1 | awk '{print $3\"/\"$2\" (\"$5\" used)}'")
-        except Exception:
+        except (OSError, TimeoutError, EOFError):
+            # Connection errors: socket issues, timeouts, connection closed
             proc = ""
             gpu_info = ""
             models = ""
