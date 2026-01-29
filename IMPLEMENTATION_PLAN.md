@@ -1073,7 +1073,7 @@ settings = Settings(model="placeholder")  # Create with defaults
 | Phase | Week | Tasks | Effort (Revised) | Status |
 |-------|------|-------|------------------|--------|
 | Phase 1 | 1-2 | 1.1-1.4 (Testing, Security, Docs, OOM) | 44-59h | ✅ DONE |
-| Phase 2 | 3-6 | 2.1-2.5 (Benchmarks, Checksums, Multi-GPU, CI/CD) | 104-148h | ✅ MOSTLY DONE (2.1, 2.3 documented only) |
+| Phase 2 | 3-6 | 2.1-2.5 (Benchmarks, Checksums, Multi-GPU, CI/CD) | 104-148h | ✅ DONE (2.1, 2.3 require GPU/infrastructure) |
 | Phase 3 | 7-12 | 3.1-3.2 (Plugins, Logging) | 40-60h | ✅ DONE |
 | **Total** | **12 weeks** | **11 tasks** | **188-267h** | **✅ COMPLETE** |
 

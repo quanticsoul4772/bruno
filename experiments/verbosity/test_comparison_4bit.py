@@ -44,7 +44,9 @@ def load_model_4bit(model_path: str):
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         quantization_config=quantization_config,
-        device_map="auto",
+        device_map={"": 0},  # Force all layers on GPU 0, no CPU offload
+        dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
     )
     
     print(f"  Loaded in {time.time() - start:.1f}s")
@@ -97,9 +99,9 @@ def main():
     print("VERBOSITY COMPARISON TEST (4-bit Quantization)")
     print("=" * 60)
     
-    # Paths
-    abliterated_path = "./models/Qwen2.5-7B-Instruct-heretic"
-    original_path = "Qwen/Qwen2.5-7B-Instruct"
+    # Paths - use local models
+    abliterated_path = "./experiments/verbosity_v2/Qwen2.5-7B-Instruct-heretic"
+    original_path = "./models/Qwen2.5-7B-Instruct"
     
     # Check if abliterated model exists
     if not Path(abliterated_path).exists():

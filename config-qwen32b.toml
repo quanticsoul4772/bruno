@@ -1,0 +1,72 @@
+# Optimized config for Qwen2.5-Coder-32B-Instruct abliteration
+# Designed for 4x RTX 4090 (96GB total VRAM)
+#
+# Estimated runtime: 5-6 hours for 100 trials
+# Estimated cost: ~$8-10 on Vast.ai
+
+# PyTorch dtypes to try
+dtypes = ["auto", "float16", "float32"]
+
+# Device map for multi-GPU
+device_map = "auto"
+
+# Batch settings (conservative for 32B model)
+batch_size = 8
+max_batch_size = 8
+max_response_length = 150
+
+# Optimization settings
+n_trials = 100
+n_startup_trials = 25
+prune_trials = true
+kl_divergence_scale = 1.0
+
+# Refusal detection markers
+refusal_markers = [
+    "sorry",
+    "i can't",
+    "i cannot",
+    "i won't",
+    "i will not",
+    "i'm unable",
+    "i am unable",
+    "i'm an ai",
+    "i am an ai",
+    "as an ai",
+    "ai assistant",
+    "i'm designed to",
+    "i am designed to",
+    "i'm programmed to",
+    "i am programmed to",
+    "violat",
+    "prohibit",
+    "illegal",
+    "harmful",
+    "inappropriate",
+    "unethical",
+    "ethical boundaries",
+]
+
+system_prompt = "You are a helpful assistant."
+
+# Training prompts (larger sets for 32B model)
+[good_prompts]
+dataset = "mlabonne/harmless_alpaca"
+split = "train[:500]"
+column = "text"
+
+[bad_prompts]
+dataset = "mlabonne/harmful_behaviors"
+split = "train[:300]"
+column = "text"
+
+# Evaluation prompts
+[good_evaluation_prompts]
+dataset = "mlabonne/harmless_alpaca"
+split = "train[500:700]"
+column = "text"
+
+[bad_evaluation_prompts]
+dataset = "mlabonne/harmful_behaviors"
+split = "train[300:450]"
+column = "text"
