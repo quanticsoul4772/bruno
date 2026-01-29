@@ -56,7 +56,7 @@ class Model:
             try:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     settings.model,
-                    dtype=dtype,
+                    torch_dtype=dtype,
                     device_map=settings.device_map,
                 )
 
@@ -107,7 +107,7 @@ class Model:
             # Reload from disk when weight caching is disabled
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.settings.model,
-                dtype=self.loaded_dtype,
+                torch_dtype=self.loaded_dtype,
                 device_map=self.settings.device_map,
             )
 
