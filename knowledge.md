@@ -20,6 +20,16 @@ cd C:\Development\Projects\heretic
 .\start-abliteration.ps1
 ```
 
+### For 32B+ Models: MUST use `--cache-weights false`
+```bash
+heretic --model MODEL --cache-weights false --storage sqlite:///study.db --study-name NAME
+```
+
+### Current Instance (June 2025)
+```bash
+ssh -p 37522 root@ssh4.vast.ai 'tail -f /workspace/heretic.log'
+```
+
 ---
 
 ## ⛔ STOP - READ THIS FIRST ⛔
@@ -322,7 +332,9 @@ chmod 600 ~/.ssh/id_rsa
 - **`--storage`**: Optuna storage URL for resume support (e.g., `sqlite:///study.db`)
 - **`--study-name`**: Name for the Optuna study (default: `heretic_study`)
 - **`--refusal-check-tokens`**: Tokens to generate for refusal detection (default: 30, lower = faster)
-- Example: `heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true --n-trials 20 --compile`
+- **`--cache-weights`**: Enable/disable in-memory weight caching (default: true). **SET TO FALSE FOR 32B+ MODELS** to avoid OOM.
+- Example (7B): `heretic --model Qwen/Qwen2.5-7B-Instruct --auto-select true --n-trials 20 --compile`
+- Example (32B): `heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --cache-weights false --storage sqlite:///study.db`
 
 ### Dataset Loading
 - **heretic uses `load_dataset()` from HuggingFace**, NOT `load_from_disk()`
@@ -349,6 +361,39 @@ chmod 600 ~/.ssh/id_rsa
 - **Stopping a Vast.ai instance KILLS running processes** - no graceful save
 - If abliteration hasn't saved the model yet, you lose ALL progress
 - Check `heretic-vast progress` for "Models Saved" before stopping
+
+### PowerShell Scripts Fail from Bash/Codebuff
+
+**Problem:** Running `.ps1` scripts from bash (like Codebuff does) often fails with syntax errors like "The string is missing the terminator".
+
+**Root Cause:** Bash can't properly execute PowerShell scripts. The error message is misleading.
+
+**Solution:** Use direct SSH commands instead:
+```bash
+# Get instance info
+vastai show instances --raw | grep -E '"id":|"ssh_host":|"ssh_port"'
+
+# Run commands directly
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai 'COMMAND'
+```
+
+**For Codebuff:** Always use direct `ssh` and `vastai` CLI commands instead of relying on the PowerShell wrapper scripts.
+
+### pip install --force-reinstall Breaks Environment
+
+**Problem:** After running `pip install --force-reinstall git+https://...`, heretic fails with "Could not import module 'Qwen2ForCausalLM'".
+
+**Root Cause:** `--force-reinstall` upgrades PyTorch and transformers to incompatible versions.
+
+**Solution:** Fix the environment:
+```bash
+pip install transformers>=4.55.2
+```
+
+**Prevention:** Never use `--force-reinstall`. Use `--upgrade` instead:
+```bash
+pip install --upgrade git+https://github.com/quanticsoul4772/abliteration-workflow.git
+```
 
 ### SSH Authentication Failures on Vast.ai
 

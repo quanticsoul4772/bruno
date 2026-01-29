@@ -35,10 +35,47 @@ cd C:\Development\Projects\heretic
 .\runpod.ps1 vast-setup
 
 # 3. Start abliteration with RESUME SUPPORT (~5-6 hours)
-.\runpod.ps1 vast-exec "export HF_HOME=/workspace/.cache/huggingface && cd /workspace && nohup heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models --storage sqlite:////workspace/heretic_study.db --study-name qwen32b-abliteration > /workspace/heretic.log 2>&1 &"
+.\runpod.ps1 vast-exec "export HF_HOME=/workspace/.cache/huggingface && cd /workspace && nohup heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models --storage sqlite:////workspace/heretic_study.db --study-name qwen32b-abliteration --cache-weights false > /workspace/heretic.log 2>&1 &"
 
 # 4. Monitor progress
 .\runpod.ps1 vast-watch
+```
+
+### Direct SSH Commands (When PowerShell Scripts Fail)
+
+**⚠️ The PowerShell scripts often fail when called from bash/Codebuff. Use these direct SSH commands instead:**
+
+```bash
+# Get instance info
+vastai show instances --raw | grep -E '"id":|"ssh_host":|"ssh_port":|"actual_status"'
+
+# Install heretic on running instance (replace PORT with actual port)
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai 'pip install git+https://github.com/quanticsoul4772/abliteration-workflow.git'
+
+# Start training with ALL required flags
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai '
+  export HF_TOKEN=YOUR_TOKEN
+  export HF_HOME=/workspace/.cache/huggingface
+  cd /workspace
+  nohup heretic \
+    --model Qwen/Qwen2.5-Coder-32B-Instruct \
+    --auto-select true \
+    --auto-select-path /workspace/models \
+    --storage sqlite:////workspace/heretic_study.db \
+    --study-name qwen32b-abliteration \
+    --cache-weights false \
+    > /workspace/heretic.log 2>&1 &
+  echo "Started PID: $!"
+'
+
+# Monitor logs
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai 'tail -f /workspace/heretic.log'
+
+# Check if heretic is running
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai 'ps aux | grep heretic | grep -v grep'
+
+# Check progress
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai 'tail -50 /workspace/heretic.log'
 ```
 
 ---
@@ -142,9 +179,21 @@ If training stops for ANY reason (crash, preemption, network issue):
 ```
 
 ### "heretic command not found"
-```powershell
-.\runpod.ps1 vast-setup  # Reinstall heretic
+```bash
+# Direct SSH install (more reliable than PowerShell script)
+ssh -o StrictHostKeyChecking=no -p PORT root@ssh4.vast.ai 'pip install git+https://github.com/quanticsoul4772/abliteration-workflow.git'
 ```
+
+### pip install breaks transformers/PyTorch
+
+**Problem:** Using `pip install --force-reinstall` can break transformers compatibility.
+
+**Solution:** Reinstall the correct transformers version:
+```bash
+ssh -p PORT root@ssh4.vast.ai 'pip install transformers>=4.55.2'
+```
+
+**Prevention:** Never use `--force-reinstall` - use regular `pip install --upgrade` instead.
 
 ### Training Not Resuming
 Check that the SQLite database exists:
@@ -154,13 +203,27 @@ Check that the SQLite database exists:
 
 If it doesn't exist, the previous run may have crashed before any trials completed.
 
-### GPU Out of Memory
-Reduce batch size in the config:
-```powershell
-.\runpod.ps1 vast-exec "cat > /workspace/config.toml << 'EOF'
-batch_size = 4
-max_batch_size = 4
-EOF"
+### GPU Out of Memory (OOM) on 32B+ Models
+
+**Problem:** The 32B model causes OOM when heretic tries to cache weights in memory (doubles memory usage from ~65GB to ~130GB).
+
+**Solution:** Use `--cache-weights false` flag:
+```bash
+heretic --model Qwen/Qwen2.5-Coder-32B-Instruct \
+  --cache-weights false \
+  --storage sqlite:////workspace/heretic_study.db \
+  --study-name qwen32b-abliteration
+```
+
+**What this does:**
+- Disables in-memory weight caching (the `copy.deepcopy(state_dict)` call)
+- Model reloads from disk between trials instead of from RAM
+- Slower (~10-20% slower) but avoids OOM
+- Essential for 32B+ models on 4x RTX 4090 (96GB total)
+
+**Alternative:** Reduce batch size (less effective):
+```bash
+heretic --model MODEL --batch-size 4 --max-batch-size 4
 ```
 
 ---
@@ -208,6 +271,10 @@ git push fork master
 6. **Vast.ai is 50% cheaper** than RunPod
 7. **Monitor with `vast-watch`** for live dashboard
 8. **Stop instance when done** - billing continues until stopped!
+9. **Use `--cache-weights false` for 32B+ models** - prevents OOM
+10. **Set HF_TOKEN on server** for faster downloads
+11. **PowerShell scripts fail from bash** - use direct SSH commands instead
+12. **Never use `pip install --force-reinstall`** on server - breaks dependencies
 
 ---
 
@@ -235,3 +302,37 @@ git push fork master
 - Don't make more tool calls
 - Don't try to "fix" anything
 - Just STOP and LISTEN
+
+---
+
+## Current Training Session (June 2025)
+
+**Instance Details:**
+- **Instance ID:** 30717523
+- **SSH:** `ssh -p 37522 root@ssh4.vast.ai`
+- **Status:** Running
+- **Model:** Qwen/Qwen2.5-Coder-32B-Instruct
+- **Flags:** `--cache-weights false --storage sqlite:////workspace/heretic_study.db --study-name qwen32b-abliteration`
+
+**Monitor:**
+```bash
+ssh -p 37522 root@ssh4.vast.ai 'tail -f /workspace/heretic.log'
+```
+
+**Check Status:**
+```bash
+ssh -p 37522 root@ssh4.vast.ai 'ps aux | grep heretic | grep -v grep && tail -30 /workspace/heretic.log'
+```
+
+---
+
+## Lessons Learned This Session
+
+| Problem | Root Cause | Solution |
+|---------|------------|----------|
+| OOM on 32B model | Weight caching doubles memory (65GB → 130GB) | `--cache-weights false` flag added to heretic |
+| PowerShell scripts fail from bash | Bash can't execute .ps1 properly | Use direct SSH commands instead |
+| `pip install --force-reinstall` broke environment | Upgraded PyTorch/transformers to incompatible versions | Never use `--force-reinstall`, use `--upgrade` |
+| HF_TOKEN not set | Forgot to export it | `export HF_TOKEN=xxx` before running heretic |
+| Vast.ai uptime misleading | Shared GPUs show accumulated time | Never use uptime as status indicator |
+| Created duplicate instances | Assumed instance was stuck | ALWAYS ask user before creating instances |
