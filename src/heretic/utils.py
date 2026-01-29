@@ -23,6 +23,37 @@ from .config import DatasetSpecification, Settings
 print = Console(highlight=False).print
 
 
+class BatchSizeError(Exception):
+    """Raised when batch size is too large for available GPU memory."""
+    pass
+
+
+def get_gpu_memory_info() -> dict:
+    """Get current GPU memory usage.
+    
+    Returns:
+        dict with keys: total_gb, used_gb, free_gb, utilization_pct
+        Returns zeros if no GPU is available.
+    """
+    if not torch.cuda.is_available():
+        return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "utilization_pct": 0}
+    
+    try:
+        total = torch.cuda.get_device_properties(0).total_memory
+        reserved = torch.cuda.memory_reserved(0)
+        allocated = torch.cuda.memory_allocated(0)
+        free = total - reserved
+        
+        return {
+            "total_gb": total / 1e9,
+            "used_gb": allocated / 1e9,
+            "free_gb": free / 1e9,
+            "utilization_pct": (allocated / total) * 100 if total > 0 else 0,
+        }
+    except Exception:
+        return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "utilization_pct": 0}
+
+
 def format_duration(seconds: float) -> str:
     seconds = round(seconds)
     hours, seconds = divmod(seconds, 3600)

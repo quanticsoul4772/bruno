@@ -35,8 +35,10 @@ from .config import Settings
 from .evaluator import Evaluator
 from .model import AbliterationParameters, Model
 from .utils import (
+    BatchSizeError,
     empty_cache,
     format_duration,
+    get_gpu_memory_info,
     get_readme_intro,
     get_trial_parameters,
     load_prompts,
@@ -207,6 +209,8 @@ def run():
 
     trial_index = 0
     start_time = time.perf_counter()
+    oom_count = 0
+    MAX_OOM_RETRIES = 3
 
     def objective(trial: Trial) -> tuple[float, float]:
         nonlocal trial_index
@@ -289,7 +293,33 @@ def run():
         print("* Abliterating...")
         model.abliterate(refusal_directions, direction_index, parameters)
         print("* Evaluating...")
-        score, kl_divergence, refusals = evaluator.get_score()
+        try:
+            score, kl_divergence, refusals = evaluator.get_score()
+        except torch.cuda.OutOfMemoryError as e:
+            nonlocal oom_count
+            oom_count += 1
+            
+            # Clear GPU memory
+            empty_cache()
+            
+            mem_info = get_gpu_memory_info()
+            print(f"[red]GPU OOM detected (attempt {oom_count}/{MAX_OOM_RETRIES})[/]")
+            print(f"[yellow]GPU Memory: {mem_info['used_gb']:.1f}/{mem_info['total_gb']:.1f} GB used[/]")
+            
+            if oom_count >= MAX_OOM_RETRIES:
+                print(f"[red]Repeated OOM errors ({oom_count}). Progress saved via Optuna storage.[/]")
+                print(f"[yellow]Resume with: heretic {settings.model} --storage {settings.storage}[/]")
+                raise BatchSizeError(
+                    f"Out of GPU memory after {oom_count} attempts. "
+                    "Try reducing batch_size or max_batch_size, or use a GPU with more VRAM."
+                ) from e
+            
+            # Reduce batch size and signal retry
+            if settings.batch_size > 1:
+                settings.batch_size = max(1, settings.batch_size // 2)
+                print(f"[yellow]Reducing batch_size to {settings.batch_size} and retrying...[/]")
+            
+            raise  # Re-raise to let Optuna handle the failed trial
 
         # Note: trial.report() and trial.should_prune() are not supported for multi-objective
         # optimization in Optuna. Pruning is disabled for now.
@@ -316,17 +346,30 @@ def run():
         return score
 
     # Create or load study with persistent storage for resume support
-    study = optuna.create_study(
-        study_name=settings.study_name,
-        storage=settings.storage,
-        load_if_exists=True,
-        sampler=TPESampler(
-            n_startup_trials=settings.n_startup_trials,
-            n_ei_candidates=128,
-            multivariate=True,
-        ),
-        directions=[StudyDirection.MINIMIZE, StudyDirection.MINIMIZE],
-    )
+    try:
+        study = optuna.create_study(
+            study_name=settings.study_name,
+            storage=settings.storage,
+            load_if_exists=True,
+            sampler=TPESampler(
+                n_startup_trials=settings.n_startup_trials,
+                n_ei_candidates=128,
+                multivariate=True,
+            ),
+            directions=[StudyDirection.MINIMIZE, StudyDirection.MINIMIZE],
+        )
+    except Exception as e:
+        error_str = str(e).lower()
+        if "database is locked" in error_str:
+            print("[red]Database is locked. Another process may be using it.[/]")
+            print("[yellow]If not, delete the .db file and restart:[/]")
+            print(f"[yellow]  rm {settings.storage.replace('sqlite:///', '')}[/]")
+            return
+        elif "disk" in error_str or "corrupt" in error_str:
+            print(f"[red]Database may be corrupted: {e}[/]")
+            print("[yellow]Backup and delete the .db file to start fresh.[/]")
+            return
+        raise
 
     # Calculate remaining trials if resuming
     completed_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
