@@ -312,7 +312,11 @@ def run():
 
         return score
 
+    # Create or load study with persistent storage for resume support
     study = optuna.create_study(
+        study_name=settings.study_name,
+        storage=settings.storage,
+        load_if_exists=True,
         sampler=TPESampler(
             n_startup_trials=settings.n_startup_trials,
             n_ei_candidates=128,
@@ -321,7 +325,19 @@ def run():
         directions=[StudyDirection.MINIMIZE, StudyDirection.MINIMIZE],
     )
 
-    study.optimize(objective, n_trials=settings.n_trials)
+    # Calculate remaining trials if resuming
+    completed_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    remaining_trials = max(0, settings.n_trials - completed_trials)
+    
+    if completed_trials > 0:
+        print()
+        print(f"[cyan]Resuming from trial {completed_trials + 1} ({completed_trials} completed trials found)[/]")
+        trial_index = completed_trials
+    
+    if remaining_trials > 0:
+        study.optimize(objective, n_trials=remaining_trials)
+    else:
+        print(f"[green]All {settings.n_trials} trials already completed![/]")
 
     best_trials = sorted(
         study.best_trials,

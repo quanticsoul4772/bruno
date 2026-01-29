@@ -99,6 +99,16 @@ class Settings(BaseSettings):
         description="Number of trials that use random sampling for the purpose of exploration.",
     )
 
+    study_name: str = Field(
+        default="heretic_study",
+        description="Name of the Optuna study. Used for resuming experiments.",
+    )
+
+    storage: str | None = Field(
+        default="sqlite:///heretic_study.db",
+        description="Optuna storage URL for persisting trials (e.g., 'sqlite:///heretic_study.db'). Set to None to disable persistence (trials will be lost if the process crashes).",
+    )
+
     # Note: Pruning is not supported for multi-objective optimization in Optuna.
     # The prune_trials option has been removed.
 
