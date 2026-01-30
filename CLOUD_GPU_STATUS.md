@@ -12,9 +12,10 @@
 - **Status:** Market completely empty for large GPUs
 
 ### RunPod
-- **Availability:** A100 80GB listed
-- **Infrastructure:** 3/3 pods failed to start (container runtime errors)
-- **Status:** Platform issues, not usable
+- **Availability:** A100 80GB, H100 80GB, H200 141GB all listed
+- **Infrastructure:** 4/4 pods failed to start (container runtime errors)
+- **Images tested:** pytorch/pytorch:2.4.0, nvidia/cuda:12.4.0, runpod/pytorch:2.1.0 (official)
+- **Status:** Confirmed platform issue, not configuration problem
 
 ### Lambda Labs
 - **A100 80GB:** 0 available
