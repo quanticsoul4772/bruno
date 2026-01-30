@@ -8,6 +8,7 @@ import time
 import warnings
 from dataclasses import asdict
 from importlib.metadata import version
+from pathlib import Path
 
 import huggingface_hub
 import optuna
@@ -33,7 +34,19 @@ from rich.traceback import install
 
 from .config import Settings
 from .evaluator import Evaluator
-from .model import AbliterationParameters, LayerRangeProfile, Model
+from .model import (
+    AbliterationParameters,
+    ConceptConeExtractionResult,
+    LayerRangeProfile,
+    Model,
+    SupervisedExtractionResult,
+)
+from .transfer import (
+    detect_model_family,
+    get_model_profile,
+    get_warm_start_params,
+    get_warm_start_variations,
+)
 from .utils import (
     BatchSizeError,
     empty_cache,
@@ -254,31 +267,27 @@ def run():
     helpfulness_direction = None
     if settings.orthogonalize_directions:
         print("* Extracting helpfulness direction for orthogonalization...")
-        try:
-            helpful_prompts = load_prompts(settings.helpfulness_prompts)
-            unhelpful_prompts = load_prompts(settings.unhelpfulness_prompts)
-            print(f"  * Loaded {len(helpful_prompts)} helpful prompts")
-            print(f"  * Loaded {len(unhelpful_prompts)} unhelpful prompts")
+        helpful_prompts = load_prompts(settings.helpfulness_prompts)
+        unhelpful_prompts = load_prompts(settings.unhelpfulness_prompts)
+        print(f"  * Loaded {len(helpful_prompts)} helpful prompts")
+        print(f"  * Loaded {len(unhelpful_prompts)} unhelpful prompts")
 
-            helpful_residuals = model.get_residuals_batched(helpful_prompts)
-            unhelpful_residuals = model.get_residuals_batched(unhelpful_prompts)
+        helpful_residuals = model.get_residuals_batched(helpful_prompts)
+        unhelpful_residuals = model.get_residuals_batched(unhelpful_prompts)
 
-            helpfulness_direction = model.extract_helpfulness_direction(
-                helpful_residuals,
-                unhelpful_residuals,
-            )
+        helpfulness_direction = model.extract_helpfulness_direction(
+            helpful_residuals,
+            unhelpful_residuals,
+        )
 
-            # Orthogonalize the refusal direction
-            print("  * Orthogonalizing refusal direction against helpfulness...")
-            refusal_directions = model.orthogonalize_direction(
-                refusal_directions,
-                helpfulness_direction,
-            )
+        # Orthogonalize the refusal direction
+        print("  * Orthogonalizing refusal direction against helpfulness...")
+        refusal_directions = model.orthogonalize_direction(
+            refusal_directions,
+            helpfulness_direction,
+        )
 
-            del helpful_residuals, unhelpful_residuals
-        except Exception as e:
-            print(f"[yellow]Warning: Failed to load helpfulness datasets: {e}[/]")
-            print("[yellow]Continuing without orthogonalization.[/]")
+        del helpful_residuals, unhelpful_residuals
 
     # We don't need the residuals after computing refusal directions.
     del good_residuals, bad_residuals
@@ -301,6 +310,261 @@ def run():
             print(
                 f"  * Layers {p.range_start:.0%}-{p.range_end:.0%}: "
                 f"weight multiplier = {p.weight_multiplier:.2f}"
+            )
+
+    # Store additional extraction results for advanced features
+    supervised_directions = None
+    concept_cone_result = None
+    compliance_direction = None
+    refusal_circuits = None
+
+    # Phase 2: Supervised Probing
+    if settings.use_supervised_probing and not settings.ensemble_probe_pca:
+        print("* Extracting refusal directions using supervised probing...")
+        # Need to reload residuals for supervised probing
+        good_residuals_sp = model.get_residuals_batched(good_prompts)
+        bad_residuals_sp = model.get_residuals_batched(bad_prompts)
+        supervised_result = model.get_refusal_directions_supervised(
+            good_residuals_sp,
+            bad_residuals_sp,
+            bad_prompts,
+            evaluator,
+            min_probe_accuracy=settings.min_probe_accuracy,
+        )
+        if isinstance(supervised_result, SupervisedExtractionResult):
+            supervised_directions = supervised_result.directions
+            print(
+                f"  * Supervised probe succeeded (mean accuracy: {supervised_result.get_mean_accuracy():.2f})"
+            )
+        else:
+            raise RuntimeError(
+                f"Supervised probing failed (accuracy below {settings.min_probe_accuracy} or class imbalance). "
+                "This can happen if the model doesn't clearly distinguish refusal vs compliance patterns. "
+                "Try lowering min_probe_accuracy, or disable use_supervised_probing to use PCA instead."
+            )
+        del good_residuals_sp, bad_residuals_sp
+        empty_cache()
+
+    # Phase 2: Ensemble Probe + PCA
+    if settings.ensemble_probe_pca:
+        print("* Extracting refusal directions using ensemble (probe + PCA)...")
+        good_residuals_ens = model.get_residuals_batched(good_prompts)
+        bad_residuals_ens = model.get_residuals_batched(bad_prompts)
+        supervised_directions = model.get_refusal_directions_ensemble(
+            good_residuals_ens,
+            bad_residuals_ens,
+            bad_prompts,
+            evaluator,
+            probe_weight=settings.ensemble_weight_probe,
+            pca_weight=settings.ensemble_weight_pca,
+            min_probe_accuracy=settings.min_probe_accuracy,
+        )
+        # Note: get_refusal_directions_ensemble raises RuntimeError if supervised probing fails
+        print("  * Ensemble directions extracted")
+        del good_residuals_ens, bad_residuals_ens
+        empty_cache()
+
+    # Phase 4: Concept Cones
+    if settings.use_concept_cones:
+        print("* Extracting concept cones...")
+        good_residuals_cc = model.get_residuals_batched(good_prompts)
+        bad_residuals_cc = model.get_residuals_batched(bad_prompts)
+        cc_result = model.get_refusal_directions_concept_cones(
+            good_residuals_cc,
+            bad_residuals_cc,
+            n_cones=settings.n_concept_cones,
+            min_cone_size=settings.min_cone_size,
+            directions_per_cone=settings.directions_per_cone,
+            min_silhouette_score=settings.min_silhouette_score,
+        )
+        if isinstance(cc_result, ConceptConeExtractionResult):
+            concept_cone_result = cc_result
+            print(f"  * Extracted {len(concept_cone_result.cones)} concept cones")
+        else:
+            raise RuntimeError(
+                f"Concept cone extraction failed (silhouette score below {settings.min_silhouette_score}). "
+                "This indicates poor clustering quality - harmful prompts may not have distinct categories. "
+                "Try increasing min_cone_size or decreasing n_concept_cones, or disable use_concept_cones."
+            )
+        del good_residuals_cc, bad_residuals_cc
+        empty_cache()
+
+    # Phase 5: CAA - Extract compliance direction
+    if settings.use_caa:
+        print("* Extracting compliance direction for CAA...")
+        bad_residuals_caa = model.get_residuals_batched(bad_prompts)
+        caa_result = model.get_compliance_directions_from_responses(
+            bad_prompts,
+            bad_residuals_caa,
+            evaluator,
+        )
+        if caa_result is not None:
+            compliant_residuals, refusing_residuals = caa_result
+            compliance_direction = model.extract_compliance_direction(
+                compliant_residuals,
+                refusing_residuals,
+            )
+            print("  * Compliance direction extracted")
+        else:
+            raise RuntimeError(
+                "CAA extraction failed due to insufficient samples. Need at least 10 refusals "
+                "and 10 compliant responses from bad_prompts. Either your model already complies "
+                "with most harmful prompts (nothing to ablate), or it refuses everything "
+                "(no compliance examples). Disable use_caa or use a different model."
+            )
+        del bad_residuals_caa
+        empty_cache()
+
+    # Phase 6: Circuit Discovery
+    if settings.use_circuit_ablation:
+        # Check for GQA models upfront
+        is_gqa, n_heads, n_kv_heads = model.is_gqa_model()
+        if is_gqa:
+            raise RuntimeError(
+                f"Circuit ablation is not supported for GQA (Grouped Query Attention) models. "
+                f"Detected: n_heads={n_heads}, n_kv_heads={n_kv_heads}. "
+                f"GQA models include Llama 3.x, Qwen2.5, and others. "
+                f"Disable use_circuit_ablation to use standard layer-level ablation instead."
+            )
+        print("* Discovering refusal circuits...")
+        refusal_circuits = model.get_or_discover_circuits(
+            refusal_directions,
+            n_circuits=settings.n_refusal_circuits,
+            importance_threshold=settings.circuit_importance_threshold,
+            cache_path=settings.circuit_cache_path,
+        )
+        if refusal_circuits:
+            print(f"  * Discovered {len(refusal_circuits)} refusal circuits")
+        else:
+            raise RuntimeError(
+                f"No refusal circuits found with importance threshold {settings.circuit_importance_threshold}. "
+                f"Try lowering circuit_importance_threshold or disable use_circuit_ablation."
+            )
+
+    def restore_and_abliterate_trial(
+        trial_params: dict[str, AbliterationParameters],
+        direction_index: float | None,
+        skip_reload: bool = False,
+    ) -> None:
+        """Restore model and apply abliteration based on trial parameters.
+
+        This helper function centralizes the abliteration logic to avoid duplication
+        across validation, auto-select, and interactive modes.
+        """
+        if not skip_reload:
+            model.reload_model()
+
+        # Get residuals for activation calibration if needed
+        calibrated_params = trial_params
+        if settings.use_activation_calibration:
+            print("  * Computing activation statistics for calibration...")
+            bad_residuals_cal = model.get_residuals_batched(bad_prompts)
+            activation_stats = model.compute_refusal_activation_stats(
+                refusal_directions,
+                bad_residuals_cal,
+                target_layer_frac=settings.activation_calibration_layer_frac,
+            )
+            calibrated_params = model.get_calibrated_parameters(
+                trial_params,
+                activation_stats,
+                target_percentile=settings.activation_target_percentile,
+                min_factor=settings.activation_calibration_min_factor,
+                max_factor=settings.activation_calibration_max_factor,
+            )
+            del bad_residuals_cal
+            empty_cache()
+
+        # Phase 6: Circuit-level ablation (if enabled and has circuits)
+        if settings.use_circuit_ablation and refusal_circuits:
+            print("  * Applying circuit-level ablation...")
+            circuit_result = model.abliterate_circuits(
+                refusal_circuits,
+                refusal_directions,
+                ablation_strength=calibrated_params[
+                    list(calibrated_params.keys())[0]
+                ].max_weight,
+            )
+            if circuit_result.gqa_detected:
+                raise RuntimeError(
+                    "Circuit ablation failed: GQA model detected at runtime. "
+                    "This should have been caught earlier. Disable use_circuit_ablation."
+                )
+            elif circuit_result.circuits_ablated > 0:
+                print(f"  * Ablated {circuit_result.circuits_ablated} circuits")
+            else:
+                raise RuntimeError(
+                    f"Circuit ablation failed: 0 circuits ablated, {circuit_result.circuits_skipped} skipped. "
+                    "Check circuit_importance_threshold setting."
+                )
+
+        # Phase 4: Concept Cones ablation
+        if settings.use_concept_cones and concept_cone_result is not None:
+            print("  * Applying concept cone ablation...")
+            model.abliterate_concept_cones(
+                concept_cone_result,
+                calibrated_params,
+                direction_weights=direction_weights if use_multi_direction else None,
+                layer_profiles=layer_profiles,
+            )
+        # Phase 5: CAA ablation
+        elif settings.use_caa and compliance_direction is not None:
+            print("  * Applying ablation with CAA...")
+            # Use supervised directions if available, otherwise standard
+            ablation_directions = (
+                supervised_directions
+                if supervised_directions is not None
+                else refusal_directions
+            )
+            model.abliterate_with_caa(
+                ablation_directions,
+                compliance_direction,
+                calibrated_params,
+                removal_strength=1.0,
+                addition_strength=settings.caa_addition_strength,
+                max_overlap=settings.caa_max_overlap,
+                layer_profiles=layer_profiles,
+            )
+        # Phase 4: Iterative refinement
+        elif settings.iterative_rounds > 1:
+            model.abliterate_iterative(
+                good_prompts,
+                bad_prompts,
+                calibrated_params,
+                max_rounds=settings.iterative_rounds,
+                min_direction_magnitude=settings.min_direction_magnitude,
+                max_kl_per_round=settings.max_kl_per_round,
+                base_logprobs=evaluator.base_logprobs
+                if settings.kl_divergence_tokens == 1
+                else None,
+                kl_check_prompts=evaluator.good_prompts
+                if settings.kl_divergence_tokens == 1
+                else None,
+                layer_profiles=layer_profiles,
+            )
+        # Phase 2: Supervised directions (if extracted)
+        elif supervised_directions is not None:
+            print("  * Using supervised probe directions...")
+            model.abliterate(
+                supervised_directions,
+                None,  # Per-layer mode for supervised directions
+                calibrated_params,
+                layer_profiles,
+            )
+        # Phase 1: Multi-direction ablation
+        elif use_multi_direction and refusal_directions_multi is not None:
+            model.abliterate_multi_direction(
+                refusal_directions_multi,
+                direction_weights,
+                calibrated_params,
+                layer_profiles,
+            )
+        # Original single-direction ablation
+        else:
+            model.abliterate(
+                refusal_directions,
+                direction_index,
+                calibrated_params,
+                layer_profiles,
             )
 
     trial_index = 0
@@ -386,44 +650,8 @@ def run():
         for name, value in get_trial_parameters(trial).items():
             print(f"  * {name} = [bold]{value}[/]")
         print("* Reloading model...")
-        model.reload_model()
         print("* Abliterating...")
-
-        # Phase 4: Support iterative refinement
-        if settings.iterative_rounds > 1:
-            print(
-                f"  * Using iterative ablation ({settings.iterative_rounds} rounds)..."
-            )
-            rounds_done, kl_values = model.abliterate_iterative(
-                good_prompts,
-                bad_prompts,
-                parameters,
-                max_rounds=settings.iterative_rounds,
-                min_direction_magnitude=settings.min_direction_magnitude,
-                max_kl_per_round=settings.max_kl_per_round,
-                base_logprobs=evaluator.base_logprobs
-                if settings.kl_divergence_tokens == 1
-                else None,
-                kl_check_prompts=evaluator.good_prompts
-                if settings.kl_divergence_tokens == 1
-                else None,
-                layer_profiles=layer_profiles,
-            )
-            print(f"  * Completed {rounds_done} iteration rounds")
-        elif use_multi_direction and refusal_directions_multi is not None:
-            # Phase 1: Multi-direction ablation
-            print(f"  * Abliterating {settings.n_refusal_directions} directions...")
-            model.abliterate_multi_direction(
-                refusal_directions_multi,
-                direction_weights,
-                parameters,
-                layer_profiles,
-            )
-        else:
-            # Original single-direction ablation
-            model.abliterate(
-                refusal_directions, direction_index, parameters, layer_profiles
-            )
+        restore_and_abliterate_trial(parameters, direction_index, skip_reload=False)
 
         print("* Evaluating...")
         try:
@@ -525,6 +753,62 @@ def run():
         )
         trial_index = completed_trials
 
+    # Phase 7: Enqueue warm-start trials if enabled and no trials completed yet
+    if settings.use_warm_start_params and completed_trials == 0:
+        components = model.get_abliterable_components()
+        warm_start_params = get_warm_start_params(
+            model_name=settings.model,
+            n_layers=len(model.get_layers()),
+            components=components,
+            override_family=settings.model_family,
+        )
+
+        if warm_start_params is not None:
+            # Get detected or overridden family
+            family = settings.model_family or detect_model_family(settings.model)
+            profile = get_model_profile(settings.model, settings.model_family)
+
+            print()
+            print(f"[cyan]Warm-start enabled for model family: [bold]{family}[/][/]")
+            if profile:
+                print(f"  * Profile: {profile.description}")
+                print(
+                    f"  * Recommended max_weight_position: {profile.recommended_max_weight_position:.0%} of layers"
+                )
+                print(f"  * Typical KL divergence: {profile.typical_kl_divergence:.2f}")
+
+            # Generate variations for exploration
+            variations = get_warm_start_variations(
+                warm_start_params,
+                n_variations=settings.warm_start_n_trials,
+                n_layers=len(model.get_layers()),
+            )
+
+            print(f"  * Enqueuing {len(variations)} warm-start trials...")
+            first_component = components[0] if components else None
+            for i, params in enumerate(variations):
+                study.enqueue_trial(params)
+                if first_component:
+                    weight_key = f"{first_component}.max_weight"
+                    weight_val = params.get(weight_key, "N/A")
+                    weight_str = (
+                        f"{weight_val:.2f}"
+                        if isinstance(weight_val, (int, float))
+                        else str(weight_val)
+                    )
+                    if i == 0:
+                        print(f"    * Base trial: max_weight={weight_str}")
+                    else:
+                        print(f"    * Variation {i}: max_weight={weight_str}")
+        else:
+            detected = detect_model_family(settings.model)
+            raise RuntimeError(
+                f"Warm-start enabled but no profile found for model: {settings.model}. "
+                f"Detected family: {detected or 'unknown'}. "
+                f"Set --model-family to one of: llama, qwen, mistral, gemma, phi. "
+                f"Or disable use_warm_start_params to use random initialization."
+            )
+
     if remaining_trials > 0:
         study.optimize(objective, n_trials=remaining_trials)
     else:
@@ -559,35 +843,15 @@ def run():
         # We need to restore the best trial for validation
         if best_trials:
             best_trial = best_trials[0]
-            model.reload_model()
             parameters = {
                 k: AbliterationParameters(**v)
                 for k, v in best_trial.user_attrs["parameters"].items()
             }
-            if settings.iterative_rounds > 1:
-                model.abliterate_iterative(
-                    good_prompts,
-                    bad_prompts,
-                    parameters,
-                    max_rounds=settings.iterative_rounds,
-                    min_direction_magnitude=settings.min_direction_magnitude,
-                    max_kl_per_round=settings.max_kl_per_round,
-                    layer_profiles=layer_profiles,
-                )
-            elif use_multi_direction and refusal_directions_multi is not None:
-                model.abliterate_multi_direction(
-                    refusal_directions_multi,
-                    direction_weights,
-                    parameters,
-                    layer_profiles,
-                )
-            else:
-                model.abliterate(
-                    refusal_directions,
-                    best_trial.user_attrs["direction_index"],
-                    parameters,
-                    layer_profiles,
-                )
+            print("* Restoring best trial for validation...")
+            restore_and_abliterate_trial(
+                parameters,
+                best_trial.user_attrs["direction_index"],
+            )
             validator.measure_post_abliteration()
             validator.print_summary()
 
@@ -597,11 +861,8 @@ def run():
                 if settings.validation_report_path:
                     report_path = settings.validation_report_path
                 else:
-                    import time as time_module
-                    from pathlib import Path
-
                     model_name = Path(settings.model).name.replace("/", "_")
-                    timestamp = int(time_module.time())
+                    timestamp = int(time.time())
                     report_path = f"./validation_report_{model_name}_{timestamp}.json"
                 report.save(report_path)
                 print(f"Validation report saved to [bold]{report_path}[/]")
@@ -626,46 +887,25 @@ def run():
 
         print()
         print(f"Restoring model from trial [bold]{trial.user_attrs['index']}[/]...")
-        print("* Reloading model...")
-        model.reload_model()
-        print("* Abliterating...")
         # Convert parameters dicts back to AbliterationParameters
         parameters = {
             k: AbliterationParameters(**v)
             for k, v in trial.user_attrs["parameters"].items()
         }
-
-        # Use same ablation logic as during optimization
-        if settings.iterative_rounds > 1:
-            model.abliterate_iterative(
-                good_prompts,
-                bad_prompts,
-                parameters,
-                max_rounds=settings.iterative_rounds,
-                min_direction_magnitude=settings.min_direction_magnitude,
-                max_kl_per_round=settings.max_kl_per_round,
-            )
-        elif use_multi_direction and refusal_directions_multi is not None:
-            model.abliterate_multi_direction(
-                refusal_directions_multi,
-                settings.direction_weights,
-                parameters,
-            )
-        else:
-            model.abliterate(
-                refusal_directions,
-                trial.user_attrs["direction_index"],
-                parameters,
-                layer_profiles,
-            )
+        print("* Reloading model...")
+        print("* Abliterating...")
+        restore_and_abliterate_trial(
+            parameters,
+            trial.user_attrs["direction_index"],
+        )
 
         # Determine save path
         if settings.auto_select_path:
             save_directory = settings.auto_select_path
         else:
             # Default to model name with -heretic suffix
-            model_name = Path(settings.model).name
-            save_directory = f"./{model_name}-heretic"
+            auto_model_name = Path(settings.model).name
+            save_directory = f"./{auto_model_name}-heretic"
 
         print(f"Saving model to [bold]{save_directory}[/]...")
         model.model.save_pretrained(save_directory)
@@ -744,38 +984,17 @@ def run():
 
         print()
         print(f"Restoring model from trial [bold]{trial.user_attrs['index']}[/]...")
-        print("* Reloading model...")
-        model.reload_model()
-        print("* Abliterating...")
         # Convert parameters dicts back to AbliterationParameters
         parameters = {
             k: AbliterationParameters(**v)
             for k, v in trial.user_attrs["parameters"].items()
         }
-
-        # Use same ablation logic as during optimization
-        if settings.iterative_rounds > 1:
-            model.abliterate_iterative(
-                good_prompts,
-                bad_prompts,
-                parameters,
-                max_rounds=settings.iterative_rounds,
-                min_direction_magnitude=settings.min_direction_magnitude,
-                max_kl_per_round=settings.max_kl_per_round,
-            )
-        elif use_multi_direction and refusal_directions_multi is not None:
-            model.abliterate_multi_direction(
-                refusal_directions_multi,
-                settings.direction_weights,
-                parameters,
-            )
-        else:
-            model.abliterate(
-                refusal_directions,
-                trial.user_attrs["direction_index"],
-                parameters,
-                layer_profiles,
-            )
+        print("* Reloading model...")
+        print("* Abliterating...")
+        restore_and_abliterate_trial(
+            parameters,
+            trial.user_attrs["direction_index"],
+        )
 
         while True:
             print()

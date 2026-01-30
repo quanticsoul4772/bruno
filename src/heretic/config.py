@@ -389,7 +389,7 @@ class Settings(BaseSettings):
 
     # Validation Framework Settings
     enable_validation: bool = Field(
-        default=False,
+        default=True,
         description="Enable validation framework to measure abliteration effectiveness. Establishes baseline metrics and measures improvement.",
     )
 
@@ -439,6 +439,163 @@ class Settings(BaseSettings):
     validation_report_path: str | None = Field(
         default=None,
         description="Path for validation report. Defaults to './validation_report_{model_name}_{timestamp}.json'.",
+    )
+
+    # Phase 1 Next-Level Improvement: Neural Refusal Detection
+    use_neural_refusal_detection: bool = Field(
+        default=True,
+        description="Use neural network-based refusal detection (zero-shot NLI) in addition to string matching. Catches soft refusals, evasive responses, and novel refusal patterns. Requires ~4GB additional VRAM.",
+    )
+
+    neural_detection_model: str = Field(
+        default="facebook/bart-large-mnli",
+        description="Model to use for neural refusal detection. Must support zero-shot classification.",
+    )
+
+    neural_detection_for_optuna: bool = Field(
+        default=True,
+        description="Use neural detection during Optuna optimization trials. Slower but better signal. Set to False to only use neural detection for final evaluation.",
+    )
+
+    neural_detection_threshold: float = Field(
+        default=0.5,
+        description="Confidence threshold for neural refusal detection. Lower = more sensitive, higher = fewer false positives.",
+    )
+
+    neural_detection_batch_size: int = Field(
+        default=8,
+        description="Batch size for neural refusal detection. Lower if running out of memory.",
+    )
+
+    # Phase 2 Next-Level Improvement: Supervised Refusal Probing
+    use_supervised_probing: bool = Field(
+        default=False,
+        description="Use supervised probing instead of PCA for direction extraction. Trains a linear classifier to predict refusal behavior, using the learned weights as the refusal direction.",
+    )
+
+    min_probe_accuracy: float = Field(
+        default=0.65,
+        description="Minimum cross-validation accuracy for supervised probe. Falls back to PCA if accuracy is below this threshold.",
+    )
+
+    ensemble_probe_pca: bool = Field(
+        default=True,
+        description="Combine supervised probe with PCA directions (ensemble mode). Uses weighted average of both direction extraction methods.",
+    )
+
+    ensemble_weight_probe: float = Field(
+        default=0.7,
+        description="Weight for supervised probe direction in ensemble mode. Must sum to 1.0 with ensemble_weight_pca.",
+    )
+
+    ensemble_weight_pca: float = Field(
+        default=0.3,
+        description="Weight for PCA direction in ensemble mode. Must sum to 1.0 with ensemble_weight_probe.",
+    )
+
+    # Phase 3 Next-Level Improvement: Activation-Scaled Weight Calibration
+    use_activation_calibration: bool = Field(
+        default=True,
+        description="Use activation-based weight calibration to scale ablation weights based on refusal activation strength. Measures the distribution of refusal activations during direction extraction and calibrates weights accordingly.",
+    )
+
+    activation_target_percentile: float = Field(
+        default=0.75,
+        description="Target percentile of refusal activations for weight calibration. Higher values (e.g., 0.95) result in more aggressive ablation, lower values (e.g., 0.5) are more conservative. Range: 0.0-1.0.",
+    )
+
+    activation_calibration_layer_frac: float = Field(
+        default=0.6,
+        description="Which layer (as fraction of total layers) to measure activation statistics from. 0.6 targets the middle-to-late layers where refusal is typically strongest.",
+    )
+
+    activation_calibration_min_factor: float = Field(
+        default=0.5,
+        description="Minimum calibration factor (prevents under-ablation). The calibrated weight will be at least base_weight * min_factor.",
+    )
+
+    activation_calibration_max_factor: float = Field(
+        default=2.0,
+        description="Maximum calibration factor (prevents over-ablation). The calibrated weight will be at most base_weight * max_factor.",
+    )
+
+    # Phase 4 Next-Level Improvement: Concept Cones Clustering
+    use_concept_cones: bool = Field(
+        default=False,
+        description="Enable concept cone extraction for adaptive ablation. Clusters harmful prompts by their residual patterns to extract category-specific refusal directions (e.g., violence vs. fraud vs. self-harm).",
+    )
+
+    n_concept_cones: int = Field(
+        default=5,
+        description="Number of harm category clusters to try when using concept cones. More cones = more specific directions, but requires more prompts per cone.",
+    )
+
+    min_cone_size: int = Field(
+        default=10,
+        description="Minimum number of prompts required per concept cone. Clusters smaller than this are skipped. With 400 prompts and 5 cones, expect ~80 per cone.",
+    )
+
+    directions_per_cone: int = Field(
+        default=2,
+        description="Number of refusal directions to extract per concept cone via PCA.",
+    )
+
+    min_silhouette_score: float = Field(
+        default=0.1,
+        description="Minimum silhouette score to use concept cones. Below this threshold, clustering quality is poor and global directions are used instead. Range: -1.0 to 1.0, higher is better.",
+    )
+
+    # Phase 5 Next-Level Improvement: Contrastive Activation Addition (CAA)
+    use_caa: bool = Field(
+        default=False,
+        description="Use Contrastive Activation Addition alongside ablation. This removes the refusal direction AND adds a compliance direction for complementary effect.",
+    )
+
+    caa_addition_strength: float = Field(
+        default=0.3,
+        description="Strength of compliance direction addition (relative to removal). Usually smaller than removal strength to avoid overcorrection. Range: 0.0-1.0.",
+    )
+
+    caa_max_overlap: float = Field(
+        default=0.5,
+        description="Maximum allowed cosine similarity between refusal and compliance directions. If overlap exceeds this, CAA addition is skipped to prevent undoing the ablation.",
+    )
+
+    # Phase 6 Next-Level Improvement: Circuit-Level Ablation
+    use_circuit_ablation: bool = Field(
+        default=False,
+        description="Use circuit-level ablation targeting specific attention heads instead of entire layers. More precise but requires non-GQA models. WARNING: Experimental, not supported for GQA models (Qwen2.5, Llama 3.x).",
+    )
+
+    n_refusal_circuits: int = Field(
+        default=20,
+        description="Number of top refusal circuits (attention heads) to ablate when using circuit-level ablation.",
+    )
+
+    circuit_importance_threshold: float = Field(
+        default=0.1,
+        description="Minimum importance score for a circuit to be ablated. Heads with importance below this threshold are skipped.",
+    )
+
+    circuit_cache_path: str | None = Field(
+        default=None,
+        description="Path to cache discovered refusal circuits (JSON). If set, circuits are loaded from cache if available, otherwise discovered and saved.",
+    )
+
+    # Phase 7 Next-Level Improvement: Cross-Model Hyperparameter Transfer
+    use_warm_start_params: bool = Field(
+        default=True,
+        description="Use warm-start parameters from model family profiles for faster Optuna convergence. Enqueues initial trials based on known good hyperparameters for the model family (llama, qwen, mistral, etc.).",
+    )
+
+    model_family: str = Field(
+        default="",
+        description="Model family for warm-start parameters. Auto-detected from model name if empty. Options: 'llama', 'qwen', 'mistral', 'gemma', 'phi'.",
+    )
+
+    warm_start_n_trials: int = Field(
+        default=3,
+        description="Number of warm-start trials to enqueue. Uses slight variations around the recommended parameters to explore the neighborhood.",
     )
 
     # "Model" refers to the Pydantic model of the settings class here,

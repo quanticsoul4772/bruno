@@ -676,9 +676,9 @@ def setup_instance(ctx, instance_id: Optional[str]):
         status.update("[bold green]Installing heretic...")
         run_ssh_command(
             conn,
-            "pip install --quiet git+https://github.com/quanticsoul4772/heretic.git",
+            "pip install --quiet git+https://github.com/quanticsoul4772/abliteration-workflow.git",
         )
-        console.print("  [green]✓[/] heretic installed")
+        console.print("  [green]✓[/] heretic installed (from abliteration-workflow)")
 
         status.update("[bold green]Checking GPU...")
         gpu_info = run_ssh_command(

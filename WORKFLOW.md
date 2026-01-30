@@ -385,8 +385,12 @@ uv run heretic-vast create RTX_4090 4  # Create new if needed
 ```
 
 **SSH Connection Issues**
-- Wait 30-60 seconds after instance starts
-- Run `uv run heretic-vast list` to get updated SSH info
+- **Initial deployment takes 3-5 minutes** for multi-GPU instances (NOT 30 seconds!)
+- The "Wait ~30 seconds" note refers to REBOOTS, not initial deployment
+- Wait for status to change from "loading" to "running" before attempting SSH
+- Run `uv run heretic-vast list` to check status - look for "running" in Status column
+- Only after status is "running", wait another 30-60 seconds for SSH to be ready
+- **DO NOT** try setup commands while instance is still "loading" - they will fail
 
 **"heretic command not found"**
 ```bash
@@ -771,3 +775,8 @@ vastai destroy instance INSTANCE_ID
 12. **Never use `pip install --force-reinstall`** on server - breaks dependencies
 13. **NEVER judge instance status by uptime** - only check if process is running
 14. **ALWAYS use 200GB disk for 32B models** - 100GB default is NOT enough
+15. **READ THIS WORKFLOW BEFORE DOING ANYTHING** - don't make assumptions
+16. **Multi-GPU instance deployment takes 3-5 minutes** - NOT 30 seconds
+17. **heretic-vast setup installs from abliteration-workflow repo** - NOT the upstream heretic repo
+18. **Verify `--cache-weights` flag exists** before starting training - old versions don't have it
+19. **The correct GitHub repo is `quanticsoul4772/abliteration-workflow`** - NOT `quanticsoul4772/heretic`

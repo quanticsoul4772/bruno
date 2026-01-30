@@ -1,5 +1,14 @@
 # Copy this file to config.toml and edit the configuration to your liking.
-# This configuration includes advanced abliteration improvements from the enhancement plan.
+# This configuration includes Phase 1-7 advanced abliteration improvements.
+#
+# PHASE 1-7 OVERVIEW:
+# - Phase 1: Neural Refusal Detection (enabled by default)
+# - Phase 2: Supervised Probing + Ensemble (enabled by default)
+# - Phase 3: Activation Calibration (enabled by default)
+# - Phase 4: Concept Cones Clustering (disabled - optional)
+# - Phase 5: Contrastive Activation Addition (disabled - optional)
+# - Phase 6: Circuit-Level Ablation (disabled - ⚠️ not for GQA models)
+# - Phase 7: Cross-Model Warm-Start Transfer (enabled by default)
 
 # =============================================================================
 # BASIC SETTINGS
@@ -60,6 +69,23 @@ n_startup_trials = 30
 prune_trials = true
 
 # =============================================================================
+# PHASE 1: NEURAL REFUSAL DETECTION (enabled by default)
+# =============================================================================
+
+# Use neural network-based refusal detection (zero-shot NLI) in addition to
+# string matching. Catches soft refusals, evasive responses, and novel patterns.
+# Requires ~4GB additional VRAM for the NLI model.
+use_neural_refusal_detection = true
+
+# Use neural detection during Optuna optimization trials.
+# Slower but provides better signal for optimization.
+neural_detection_for_optuna = true
+
+# NLI model confidence threshold for refusal classification.
+# (Configured via nli_refusal_threshold in config.py if needed)
+# nli_refusal_threshold = 0.7
+
+# =============================================================================
 # PHASE 3: CAPABILITY PRESERVATION METRICS
 # =============================================================================
 
@@ -69,7 +95,27 @@ prune_trials = true
 kl_divergence_tokens = 5
 
 # =============================================================================
-# PHASE 1: MULTI-DIRECTION PCA EXTRACTION
+# PHASE 2: SUPERVISED PROBING + ENSEMBLE (enabled by default)
+# =============================================================================
+
+# Use supervised probing to extract refusal directions via linear classifiers.
+# Trains logistic regression per layer on actual refusal vs compliance labels.
+use_supervised_probing = false
+
+# Combine supervised probe with PCA directions (ensemble mode).
+# Uses weighted average of both extraction methods for better accuracy.
+ensemble_probe_pca = true
+
+# Weights for ensemble combination (probe_weight + pca_weight should = 1.0).
+ensemble_weight_probe = 0.7
+ensemble_weight_pca = 0.3
+
+# Minimum cross-validation accuracy for supervised probe to be used.
+# Falls back to PCA if accuracy is below threshold.
+min_probe_accuracy = 0.65
+
+# =============================================================================
+# PCA DIRECTION EXTRACTION
 # =============================================================================
 
 # Use contrastive PCA to extract multiple refusal directions.
@@ -108,12 +154,103 @@ min_direction_magnitude = 0.1
 max_kl_per_round = 0.5
 
 # =============================================================================
+# PHASE 3: ACTIVATION CALIBRATION (enabled by default)
+# =============================================================================
+
+# Use activation-based weight calibration to scale ablation weights based on
+# refusal activation strength. Measures distribution of refusal activations
+# and calibrates weights accordingly.
+use_activation_calibration = true
+
+# Target percentile of activation distribution to calibrate to.
+# Higher = more aggressive ablation, lower = more conservative.
+activation_target_percentile = 0.75
+
+# Which layer fraction to measure activations from (0.0-1.0).
+# 0.6 = middle-to-late layers where refusal is typically strongest.
+activation_calibration_layer_frac = 0.6
+
+# Calibration factor bounds to prevent extreme values.
+activation_calibration_min_factor = 0.5
+activation_calibration_max_factor = 2.0
+
+# =============================================================================
+# PHASE 4: CONCEPT CONES CLUSTERING (disabled by default)
+# =============================================================================
+
+# Enable concept cone extraction for category-specific ablation.
+# Clusters harmful prompts by their residual patterns to extract
+# category-specific refusal directions (e.g., violence vs fraud vs self-harm).
+use_concept_cones = false
+
+# Number of harm category clusters to try.
+n_concept_cones = 5
+
+# Minimum prompts required per concept cone.
+min_cone_size = 10
+
+# Number of refusal directions to extract per cone via PCA.
+directions_per_cone = 2
+
+# Minimum silhouette score to use concept cones (falls back to global PCA if lower).
+min_silhouette_score = 0.1
+
+# =============================================================================
 # PHASE 5: DIRECTION ORTHOGONALIZATION
 # =============================================================================
 
 # Orthogonalize refusal direction against helpfulness direction.
 # This preserves helpful behaviors that may correlate with refusal.
 orthogonalize_directions = true
+
+# =============================================================================
+# PHASE 5: CONTRASTIVE ACTIVATION ADDITION - CAA (disabled by default)
+# =============================================================================
+
+# Use Contrastive Activation Addition alongside ablation.
+# Removes refusal direction AND adds compliance direction.
+use_caa = false
+
+# Strength of compliance direction addition (relative to removal).
+# Usually smaller than removal to avoid overcorrection.
+caa_addition_strength = 0.3
+
+# Maximum cosine similarity between refusal and compliance directions.
+# If overlap exceeds this, CAA addition is skipped.
+caa_max_overlap = 0.5
+
+# =============================================================================
+# PHASE 6: CIRCUIT-LEVEL ABLATION (disabled by default)
+# ⚠️ WARNING: Not compatible with GQA models (Llama 3.x, Qwen 2.5)
+# =============================================================================
+
+# Use circuit-level ablation targeting specific attention heads.
+# More precise but requires non-GQA models.
+use_circuit_ablation = false
+
+# Number of top refusal circuits (attention heads) to ablate.
+n_refusal_circuits = 20
+
+# Minimum importance score for a circuit to be ablated.
+circuit_importance_threshold = 0.1
+
+# Path to cache discovered circuits (JSON). Leave empty to skip caching.
+# circuit_cache_path = "./refusal_circuits.json"
+
+# =============================================================================
+# PHASE 7: CROSS-MODEL WARM-START TRANSFER (enabled by default)
+# =============================================================================
+
+# Use warm-start parameters from model family profiles for faster Optuna convergence.
+# Enqueues initial trials based on known good hyperparameters.
+use_warm_start_params = true
+
+# Model family for warm-start (auto-detected if empty).
+# Options: llama, qwen, mistral, gemma, phi
+model_family = ""
+
+# Number of warm-start trials to enqueue.
+warm_start_n_trials = 3
 
 # =============================================================================
 # PHASE 2: REFUSAL DETECTION
@@ -233,7 +370,7 @@ column = "text"
 # Enable validation framework to measure abliteration effectiveness.
 # When enabled, establishes baseline metrics before abliteration and measures
 # improvement after optimization completes.
-enable_validation = false
+enable_validation = true
 
 # Run MMLU capability evaluation during validation.
 # Only active when enable_validation = true.

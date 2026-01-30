@@ -99,12 +99,27 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 - Cloud CLI for Vast.ai GPU management
 - Experiments framework for testing new behavioral directions
 
+### Advanced Abliteration (Phases 1-7)
+
+Heretic includes state-of-the-art abliteration improvements:
+
+| Phase | Feature | Default | Description |
+|-------|---------|---------|-------------|
+| 1 | **Neural Refusal Detection** | ✅ ON | Zero-shot NLI catches soft refusals and evasive responses |
+| 2 | **Supervised Probing + Ensemble** | ✅ ON | Linear probes combined with PCA for better direction extraction |
+| 3 | **Activation Calibration** | ✅ ON | Adaptive weight scaling based on refusal activation strength |
+| 4 | **Concept Cones** | OFF | Category-specific directions (violence, fraud, self-harm, etc.) |
+| 5 | **CAA** | OFF | Contrastive Activation Addition - add compliance direction |
+| 6 | **Circuit-Level Ablation** | OFF | Target specific attention heads (⚠️ Not for GQA models) |
+| 7 | **Warm-Start Transfer** | ✅ ON | Model family profiles for 2x faster Optuna convergence |
+
 ### Performance Optimizations
 
 - In-memory weight caching (5-10x faster trial reset vs disk reload)
 - Optional torch.compile() support (1.5-2x inference speedup)
 - Early stopping for refusal detection (40-60% faster evaluation)
 - Parallel KL divergence and refusal counting
+- Model family warm-start for faster optimization convergence
 
 ## Requirements
 
@@ -129,6 +144,16 @@ See `LESSONS_LEARNED.md` for detailed troubleshooting and configuration guidance
 **Expected runtime for 32B models:**
 - 4x RTX 4090: ~30-35 hours for 200 trials
 - 1x A100 80GB: ~12-15 hours for 200 trials (faster with weight caching enabled)
+
+### GQA Model Limitations
+
+Models using Grouped Query Attention (GQA) have limited feature support:
+
+- **Affected models:** Llama 3.x, Qwen 2.5, and others with `num_kv_heads != num_attention_heads`
+- **Circuit-level ablation:** ❌ Not supported (use standard layer-level ablation)
+- **All other features:** ✅ Fully supported
+
+Heretic will automatically detect GQA models and raise a clear error if incompatible features are enabled.
 
 ## Installation
 
@@ -182,6 +207,19 @@ heretic mistralai/Mistral-7B-Instruct-v0.3 --auto-select --auto-select-path ./ou
 | `--study-name NAME` | Optuna study name (default: `heretic_study`) |
 | `--refusal-check-tokens N` | Tokens for refusal detection (default: 30) |
 
+### Advanced Feature Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--use-neural-refusal-detection` | true | Zero-shot NLI refusal detection |
+| `--ensemble-probe-pca` | true | Combine supervised probe + PCA |
+| `--use-activation-calibration` | true | Adaptive weight scaling |
+| `--use-warm-start-params` | true | Model family warm-start |
+| `--use-concept-cones` | false | Category-specific directions |
+| `--use-caa` | false | Contrastive Activation Addition |
+| `--use-circuit-ablation` | false | Attention head targeting (⚠️ No GQA) |
+| `--model-family` | auto | Override detected family (llama/qwen/mistral/gemma/phi) |
+
 ## Configuration
 
 Copy `config.default.toml` to `config.toml` and customize:
@@ -200,27 +238,63 @@ study_name = "heretic_study"
 
 # Evaluation settings
 refusal_check_tokens = 30  # Fewer tokens = faster evaluation
+
+# Advanced features (all enabled by default)
+use_neural_refusal_detection = true   # Phase 1: Zero-shot NLI
+ensemble_probe_pca = true             # Phase 2: Probe + PCA ensemble
+use_activation_calibration = true     # Phase 3: Adaptive weight scaling
+use_warm_start_params = true          # Phase 7: Model family warm-start
+enable_validation = true              # Validation framework
+
+# Optional advanced features (disabled by default)
+use_concept_cones = false             # Phase 4: Category clustering
+use_caa = false                       # Phase 5: Compliance direction addition
+use_circuit_ablation = false          # Phase 6: Attention head targeting
 ```
+
+### Model Compatibility Notes
+
+| Model Family | Neural Detection | Supervised Probing | Circuit Ablation | Warm-Start |
+|--------------|------------------|-------------------|------------------|------------|
+| Llama 3.x | ✅ | ✅ | ❌ (GQA) | ✅ |
+| Qwen 2.5 | ✅ | ✅ | ❌ (GQA) | ✅ |
+| Mistral | ✅ | ✅ | ✅ | ✅ |
+| Gemma | ✅ | ✅ | ✅ | ✅ |
+| Phi | ✅ | ✅ | ✅ | ✅ |
 
 ## How It Works
 
 1. **Load model** - Loads the target model with automatic dtype selection and multi-GPU distribution
 2. **Extract behavioral directions** - Computes per-layer activation patterns from contrastive prompt pairs
-3. **Optimize modification** - Uses Optuna to find optimal parameters that modify behavior while preserving capabilities (measured by KL divergence)
-4. **Select result** - Presents Pareto-optimal trials for user selection
-5. **Export** - Save locally or upload to HuggingFace
+3. **Apply enhancements** - Neural detection, supervised probing, activation calibration, warm-start
+4. **Optimize modification** - Uses Optuna to find optimal parameters that modify behavior while preserving capabilities (measured by KL divergence)
+5. **Validate results** - Measure refusal reduction and capability preservation
+6. **Select result** - Presents Pareto-optimal trials for user selection
+7. **Export** - Save locally or upload to HuggingFace
 
 ### The Core Technique
 
 Heretic uses **activation direction analysis** to find and remove behavioral tendencies:
 
 ```
-1. FIND direction    → Compare activations on contrastive prompts
-2. PROJECT it out    → Orthogonalize weight matrices against that direction
-3. OPTIMIZE          → Find intensity that modifies behavior without destroying capability
+1. FIND direction    → Compare activations on contrastive prompts (PCA + supervised probing)
+2. CALIBRATE         → Scale weights based on activation strength (Phase 3)
+3. PROJECT it out    → Orthogonalize weight matrices against that direction
+4. OPTIMIZE          → Find intensity that modifies behavior without destroying capability
+5. VALIDATE          → Measure improvement with neural refusal detection
 ```
 
 This technique is general - it works for any behavior encoded as a direction in activation space.
+
+### Advanced Features
+
+**Neural Refusal Detection (Phase 1):** Uses zero-shot NLI to catch soft refusals, evasive responses, and novel refusal patterns that string matching misses.
+
+**Ensemble Direction Extraction (Phase 2):** Combines supervised linear probes with contrastive PCA for more accurate refusal direction identification.
+
+**Activation Calibration (Phase 3):** Measures how strongly prompts activate the refusal direction and scales ablation weights accordingly - stronger activations get stronger ablation.
+
+**Warm-Start Transfer (Phase 7):** Uses pre-computed hyperparameter profiles for model families (Llama, Qwen, Mistral, Gemma, Phi) to initialize Optuna, achieving ~2x faster convergence.
 
 ## Web Search Feature
 

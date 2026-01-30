@@ -5,7 +5,7 @@ import copy
 import math
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -23,6 +23,9 @@ from transformers.generation.utils import GenerateOutput
 
 from .config import Settings
 from .utils import batchify, empty_cache, print
+
+if TYPE_CHECKING:
+    from .evaluator import Evaluator
 
 
 @dataclass
@@ -51,6 +54,495 @@ class LayerRangeProfile:
     range_start: float  # 0.0-1.0 (fraction of total layers)
     range_end: float  # 0.0-1.0 (fraction of total layers)
     weight_multiplier: float  # Applied to computed abliteration weight
+
+
+@dataclass
+class RefusalActivationStats:
+    """Statistics about refusal direction activations across prompts.
+
+    Used for calibrating ablation weights based on the strength of refusal
+    activations in the specific model/prompt combination. This enables
+    adaptive weight scaling instead of fixed ablation strengths.
+
+    Attributes:
+        mean_projection: Mean absolute projection onto refusal direction
+        std_projection: Standard deviation of projections
+        percentile_25: 25th percentile of projection values
+        percentile_75: 75th percentile of projection values
+        percentile_95: 95th percentile of projection values
+        n_samples: Number of samples used for statistics
+        target_layer: Which layer these statistics were computed from
+    """
+
+    mean_projection: float
+    std_projection: float
+    percentile_25: float
+    percentile_75: float
+    percentile_95: float
+    n_samples: int
+    target_layer: int
+
+    def get_percentile_value(self, percentile: float) -> float:
+        """Get interpolated percentile value.
+
+        Args:
+            percentile: Value between 0.0 and 1.0
+
+        Returns:
+            Estimated value at the given percentile
+        """
+        if percentile <= 0.25:
+            # Extrapolate below 25th percentile using mean and std
+            return self.mean_projection - self.std_projection * (0.5 - percentile) * 2
+        elif percentile <= 0.5:
+            # Interpolate between 25th percentile and mean
+            t = (percentile - 0.25) / 0.25
+            return self.percentile_25 + t * (self.mean_projection - self.percentile_25)
+        elif percentile <= 0.75:
+            # Interpolate between mean and 75th percentile
+            t = (percentile - 0.5) / 0.25
+            return self.mean_projection + t * (
+                self.percentile_75 - self.mean_projection
+            )
+        elif percentile <= 0.95:
+            # Interpolate between 75th and 95th percentile
+            t = (percentile - 0.75) / 0.2
+            return self.percentile_75 + t * (self.percentile_95 - self.percentile_75)
+        else:
+            # Extrapolate above 95th percentile
+            return self.percentile_95 + self.std_projection * (percentile - 0.95) * 5
+
+
+@dataclass
+class ConceptCone:
+    """A cluster of harmful prompts with their specific refusal direction.
+
+    Represents a "concept cone" - a category of harmful prompts (e.g., violence,
+    illegal content, self-harm) that may activate different refusal mechanisms.
+    Each cone has its own extracted refusal directions.
+
+    Attributes:
+        cluster_id: Unique identifier for this cluster
+        centroid: Embedding centroid for this category (mean across layers)
+        directions: Refusal directions specific to this cone
+            Shape: (n_layers, n_components, hidden_dim)
+        eigenvalues: Eigenvalues for each direction per layer
+            Shape: (n_layers, n_components)
+        prompt_indices: Indices of prompts belonging to this cone
+        size: Number of prompts in this cone
+    """
+
+    cluster_id: int
+    centroid: Tensor  # Mean embedding for this cluster
+    directions: Tensor  # Refusal directions for this cone
+    eigenvalues: Tensor  # Eigenvalues from PCA
+    prompt_indices: list[int]  # Which prompts belong to this cone
+    size: int  # Number of prompts in this cone
+
+
+@dataclass
+class ConceptConeExtractionResult:
+    """Result from concept cone-based refusal direction extraction.
+
+    Contains multiple concept cones, each representing a category of harmful
+    prompts with its own refusal directions.
+    """
+
+    cones: list[ConceptCone]
+    silhouette_score: float  # Clustering quality metric (-1 to 1, higher is better)
+    n_clusters_requested: int  # How many clusters were requested
+    n_clusters_valid: int  # How many clusters passed min_size threshold
+
+    def get_global_directions(self) -> Tensor:
+        """Get weighted average of all cone directions.
+
+        Weights cones by their size (number of prompts).
+
+        Returns:
+            Tensor of shape (n_layers, n_components, hidden_dim)
+        """
+        if not self.cones:
+            raise ValueError("No cones available")
+
+        total_size = sum(cone.size for cone in self.cones)
+        if total_size == 0:
+            return self.cones[0].directions
+
+        # Weighted average of directions
+        weighted_sum = torch.zeros_like(self.cones[0].directions)
+        for cone in self.cones:
+            weight = cone.size / total_size
+            weighted_sum += weight * cone.directions
+
+        return weighted_sum
+
+    def get_primary_directions(self) -> Tensor:
+        """Get first principal direction from each cone, stacked.
+
+        Returns:
+            Tensor of shape (n_cones, n_layers, hidden_dim)
+        """
+        if not self.cones:
+            raise ValueError("No cones available")
+
+        return torch.stack([cone.directions[:, 0, :] for cone in self.cones])
+
+
+class ConceptConeExtractor:
+    """Extract multiple concept cones from harmful prompts.
+
+    Uses KMeans clustering on residual patterns to identify different
+    categories of harmful content, then extracts category-specific
+    refusal directions for each cluster.
+    """
+
+    def __init__(
+        self,
+        n_cones: int = 5,
+        n_directions_per_cone: int = 2,
+        min_cluster_size: int = 10,
+        min_silhouette_score: float = 0.1,
+    ):
+        self.n_cones = n_cones
+        self.n_directions_per_cone = n_directions_per_cone
+        self.min_cluster_size = min_cluster_size
+        self.min_silhouette_score = min_silhouette_score
+        self.cones: list[ConceptCone] = []
+        self.silhouette_score = 0.0
+        self.cluster_labels: np.ndarray | None = None
+
+    def extract(
+        self,
+        good_residuals: Tensor,
+        bad_residuals: Tensor,
+        model: "Model",
+    ) -> ConceptConeExtractionResult:
+        """Extract concept cones from bad prompts.
+
+        Clusters bad prompts by their residual patterns and extracts
+        refusal directions specific to each cluster.
+
+        Args:
+            good_residuals: Residuals from harmless prompts
+                Shape: (n_good, n_layers, hidden_dim)
+            bad_residuals: Residuals from harmful prompts
+                Shape: (n_bad, n_layers, hidden_dim)
+            model: Model instance for PCA extraction
+
+        Returns:
+            ConceptConeExtractionResult with extracted cones
+        """
+        from sklearn.cluster import KMeans
+        from sklearn.metrics import silhouette_score
+
+        # Step 1: Cluster bad prompts by their residual patterns
+        # Use the mean across layers as the embedding
+        bad_embeddings = bad_residuals.mean(dim=1).cpu().numpy()
+
+        # Adjust n_clusters if we don't have enough samples
+        n_samples = bad_embeddings.shape[0]
+        actual_n_cones = min(self.n_cones, n_samples // self.min_cluster_size)
+        if actual_n_cones < 2:
+            print(
+                f"[yellow]Warning: Not enough samples ({n_samples}) for clustering. "
+                f"Need at least {self.min_cluster_size * 2} samples for 2 clusters.[/yellow]"
+            )
+            actual_n_cones = 1
+
+        if actual_n_cones == 1:
+            # Single cluster - just use all bad residuals
+            pca_result = model.get_refusal_directions_pca(
+                good_residuals, bad_residuals, n_components=self.n_directions_per_cone
+            )
+            single_cone = ConceptCone(
+                cluster_id=0,
+                centroid=torch.from_numpy(bad_embeddings.mean(axis=0)).float(),
+                directions=pca_result.directions,
+                eigenvalues=pca_result.eigenvalues,
+                prompt_indices=list(range(n_samples)),
+                size=n_samples,
+            )
+            return ConceptConeExtractionResult(
+                cones=[single_cone],
+                silhouette_score=0.0,
+                n_clusters_requested=self.n_cones,
+                n_clusters_valid=1,
+            )
+
+        # Perform KMeans clustering
+        kmeans = KMeans(
+            n_clusters=actual_n_cones,
+            random_state=42,
+            n_init=10,
+        )
+        self.cluster_labels = kmeans.fit_predict(bad_embeddings)
+
+        # Evaluate clustering quality
+        if len(set(self.cluster_labels)) > 1:
+            self.silhouette_score = silhouette_score(
+                bad_embeddings, self.cluster_labels
+            )
+            print(f"  * Concept cone silhouette score: {self.silhouette_score:.3f}")
+
+            if self.silhouette_score < self.min_silhouette_score:
+                print(
+                    f"[yellow]Warning: Poor clustering quality "
+                    f"(silhouette={self.silhouette_score:.3f} < {self.min_silhouette_score}). "
+                    f"Refusal may not have distinct concept cones.[/yellow]"
+                )
+        else:
+            self.silhouette_score = 0.0
+
+        # Extract directions for each cluster
+        self.cones = []
+        for cluster_id in range(actual_n_cones):
+            mask = self.cluster_labels == cluster_id
+            cluster_size = int(mask.sum())
+
+            if cluster_size < self.min_cluster_size:
+                print(
+                    f"  * Skipping cluster {cluster_id} "
+                    f"(size={cluster_size} < {self.min_cluster_size})"
+                )
+                continue
+
+            # Extract directions specific to this cluster
+            cluster_residuals = bad_residuals[mask]
+
+            pca_result = model.get_refusal_directions_pca(
+                good_residuals,
+                cluster_residuals,
+                n_components=self.n_directions_per_cone,
+            )
+
+            cone = ConceptCone(
+                cluster_id=cluster_id,
+                centroid=torch.from_numpy(kmeans.cluster_centers_[cluster_id]).float(),
+                directions=pca_result.directions,
+                eigenvalues=pca_result.eigenvalues,
+                prompt_indices=torch.where(torch.tensor(mask))[0].tolist(),
+                size=cluster_size,
+            )
+            self.cones.append(cone)
+
+        print(
+            f"  * Extracted {len(self.cones)} concept cones "
+            f"from {actual_n_cones} clusters"
+        )
+
+        return ConceptConeExtractionResult(
+            cones=self.cones,
+            silhouette_score=self.silhouette_score,
+            n_clusters_requested=self.n_cones,
+            n_clusters_valid=len(self.cones),
+        )
+
+    def select_cone(self, prompt_residual: Tensor) -> ConceptCone:
+        """Select the most relevant cone for a given prompt.
+
+        Finds the cone whose centroid is closest to the prompt's embedding.
+
+        Args:
+            prompt_residual: Residual for a single prompt
+                Shape: (n_layers, hidden_dim)
+
+        Returns:
+            The ConceptCone closest to the prompt
+
+        Raises:
+            ValueError: If no cones have been extracted
+        """
+        if not self.cones:
+            raise ValueError("No cones extracted. Call extract() first.")
+
+        # Average across layers to get embedding
+        embedding = prompt_residual.mean(dim=0).cpu()
+
+        # Find nearest centroid
+        min_dist = float("inf")
+        best_cone = self.cones[0]
+
+        for cone in self.cones:
+            dist = torch.norm(embedding - cone.centroid).item()
+            if dist < min_dist:
+                min_dist = dist
+                best_cone = cone
+
+        return best_cone
+
+    def get_cone_assignment(self, prompt_residuals: Tensor) -> list[int]:
+        """Get cone assignments for multiple prompts.
+
+        Args:
+            prompt_residuals: Residuals for multiple prompts
+                Shape: (n_prompts, n_layers, hidden_dim)
+
+        Returns:
+            List of cone indices (into self.cones) for each prompt
+        """
+        if not self.cones:
+            raise ValueError("No cones extracted. Call extract() first.")
+
+        assignments = []
+        for i in range(prompt_residuals.shape[0]):
+            cone = self.select_cone(prompt_residuals[i])
+            # Find index of this cone in self.cones
+            cone_idx = next(
+                j for j, c in enumerate(self.cones) if c.cluster_id == cone.cluster_id
+            )
+            assignments.append(cone_idx)
+
+        return assignments
+
+
+@dataclass
+class RefusalCircuit:
+    """A specific attention head identified as mediating refusal.
+
+    Represents a single attention head that contributes to refusal behavior.
+    Circuit-level ablation targets these specific heads instead of entire layers,
+    potentially reducing capability damage.
+
+    Attributes:
+        layer_idx: Index of the transformer layer containing this head
+        head_idx: Index of the attention head within the layer
+        importance: How much this head contributes to refusal (0.0-1.0)
+            Higher values indicate stronger refusal mediation
+    """
+
+    layer_idx: int
+    head_idx: int
+    importance: float
+
+
+@dataclass
+class CircuitAblationResult:
+    """Result from circuit-level ablation.
+
+    Contains information about which circuits were ablated and any issues encountered.
+    """
+
+    circuits_ablated: int  # Number of circuits successfully ablated
+    circuits_skipped: int  # Number of circuits skipped (out of bounds, etc.)
+    gqa_detected: bool  # Whether GQA was detected (ablation skipped if True)
+    n_heads: int  # Number of attention heads in the model
+    n_kv_heads: int  # Number of key-value heads (differs from n_heads in GQA)
+
+
+@dataclass
+class SupervisedExtractionResult:
+    """Result from supervised probe-based refusal direction extraction.
+
+    Contains directions learned by training linear classifiers to predict
+    refusal behavior, along with cross-validation accuracy scores.
+    """
+
+    directions: Tensor  # Shape: (n_layers, hidden_dim)
+    accuracies: list[float]  # Cross-validation accuracy per layer
+
+    def get_mean_accuracy(self) -> float:
+        """Get the mean cross-validation accuracy across all layers."""
+        return sum(self.accuracies) / len(self.accuracies) if self.accuracies else 0.0
+
+    def get_min_accuracy(self) -> float:
+        """Get the minimum cross-validation accuracy across layers."""
+        return min(self.accuracies) if self.accuracies else 0.0
+
+    def get_max_accuracy(self) -> float:
+        """Get the maximum cross-validation accuracy across layers."""
+        return max(self.accuracies) if self.accuracies else 0.0
+
+
+class RefusalProbe:
+    """Linear probe trained to predict refusal behavior.
+
+    Uses logistic regression with L2 regularization and balanced class weights
+    to handle potential class imbalance. The learned weights serve as a
+    refusal direction that directly captures the decision boundary between
+    refuse and comply behaviors.
+    """
+
+    def __init__(self, hidden_dim: int, device: str = "cpu"):
+        self.device = device
+        self.hidden_dim = hidden_dim
+        self.weights = torch.zeros(hidden_dim, device=device)
+        self.bias = 0.0
+        self.accuracy = 0.0  # Track probe quality via cross-validation
+
+    def fit(
+        self,
+        refusal_residuals: Tensor,  # Residuals from prompts that triggered refusals
+        comply_residuals: Tensor,  # Residuals from prompts that got compliance
+        layer_idx: int,
+    ) -> float:
+        """Train probe on labeled residuals using logistic regression.
+
+        Args:
+            refusal_residuals: Residuals from prompts where model refused
+                Shape: (n_refusal, n_layers, hidden_dim)
+            comply_residuals: Residuals from prompts where model complied
+                Shape: (n_comply, n_layers, hidden_dim)
+            layer_idx: Which layer to extract activations from
+
+        Returns:
+            Cross-validation accuracy score (0.0-1.0)
+        """
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.model_selection import cross_val_score
+
+        # Combine data from the specified layer
+        X = (
+            torch.cat(
+                [
+                    refusal_residuals[:, layer_idx, :],
+                    comply_residuals[:, layer_idx, :],
+                ],
+                dim=0,
+            )
+            .cpu()
+            .numpy()
+        )
+
+        # Labels: 1 for refusal, 0 for compliance
+        y = np.concatenate(
+            [
+                np.ones(len(refusal_residuals)),
+                np.zeros(len(comply_residuals)),
+            ]
+        )
+
+        # Handle class imbalance with balanced class weights
+        clf = LogisticRegression(
+            penalty="l2",
+            C=1.0,
+            max_iter=1000,
+            class_weight="balanced",  # Handle imbalanced data
+            solver="lbfgs",
+            random_state=42,
+        )
+
+        # Cross-validate to check probe quality (minimum 10 samples needed)
+        if len(X) >= 10:
+            n_splits = min(5, len(X) // 2)
+            if n_splits >= 2:
+                cv_scores = cross_val_score(clf, X, y, cv=n_splits)
+                self.accuracy = float(cv_scores.mean())
+            else:
+                self.accuracy = 0.5  # Insufficient data for CV
+        else:
+            self.accuracy = 0.5  # Insufficient data
+
+        # Fit on all data
+        clf.fit(X, y)
+
+        # Extract weights as the refusal direction
+        self.weights = torch.from_numpy(clf.coef_[0]).float().to(self.device)
+        self.bias = float(clf.intercept_[0])
+
+        # Normalize to unit vector
+        self.weights = F.normalize(self.weights, p=2, dim=0)
+
+        return self.accuracy
 
 
 @dataclass
@@ -378,6 +870,9 @@ class Model:
             # Clear CUDA cache periodically to prevent memory fragmentation
             if layer_index % 8 == 7:
                 empty_cache()
+
+        # Clear the device projector cache to prevent memory leaks
+        device_projectors_cache.clear()
 
     def get_chat(self, prompt: str) -> list[dict[str, str]]:
         return [
@@ -769,6 +1264,1071 @@ class Model:
 
             # Apply abliteration with scaled weights (per-layer mode)
             self.abliterate(single_direction, None, scaled_parameters, layer_profiles)
+
+    # Phase 2: Supervised Refusal Probing
+    def get_refusal_directions_supervised(
+        self,
+        good_residuals: Tensor,
+        bad_residuals: Tensor,
+        bad_prompts: list[str],
+        evaluator: "Evaluator",
+        min_probe_accuracy: float = 0.65,
+    ) -> SupervisedExtractionResult | PCAExtractionResult:
+        """Extract refusal directions using supervised probing.
+
+        Unlike PCA which finds variance directions, this finds the actual
+        decision boundary between refuse/comply by training linear classifiers.
+
+        The method:
+        1. Generates responses to bad prompts
+        2. Labels each prompt as "triggered refusal" or "got compliance"
+        3. Trains a logistic regression probe per layer
+        4. Uses the learned weights as refusal directions
+
+        Falls back to PCA extraction if:
+        - Insufficient class balance (< 10 samples per class)
+        - Mean probe accuracy below min_probe_accuracy threshold
+
+        Args:
+            good_residuals: Residuals from harmless prompts
+                Shape: (n_good, n_layers, hidden_dim)
+            bad_residuals: Residuals from harmful prompts
+                Shape: (n_bad, n_layers, hidden_dim)
+            bad_prompts: List of bad prompts (must match bad_residuals length)
+            evaluator: Evaluator instance for refusal detection
+            min_probe_accuracy: Minimum cross-validation accuracy required
+                Falls back to PCA if mean accuracy is below this threshold
+
+        Returns:
+            SupervisedExtractionResult if successful, or PCAExtractionResult as fallback
+        """
+        n_layers = good_residuals.shape[1]
+        hidden_dim = good_residuals.shape[2]
+        device = good_residuals.device
+        directions: list[Tensor] = []
+        accuracies: list[float] = []
+
+        # Validate prompt/residual alignment
+        if len(bad_prompts) != bad_residuals.shape[0]:
+            print(
+                f"[yellow]Warning: Prompt count ({len(bad_prompts)}) != residual count "
+                f"({bad_residuals.shape[0]}). Using first {min(len(bad_prompts), bad_residuals.shape[0])} samples.[/yellow]"
+            )
+            n_samples = min(len(bad_prompts), bad_residuals.shape[0])
+            bad_prompts = bad_prompts[:n_samples]
+            bad_residuals = bad_residuals[:n_samples]
+
+        print("  * Generating responses to classify refusal behavior...")
+        bad_responses = self.get_responses_batched(bad_prompts)
+
+        # Label based on actual responses using the evaluator
+        refusal_mask = torch.tensor(
+            [evaluator.is_refusal(r) for r in bad_responses],
+            dtype=torch.bool,
+            device=device,
+        )
+
+        # Check for class balance
+        n_refusals = int(refusal_mask.sum().item())
+        n_comply = len(refusal_mask) - n_refusals
+
+        print(
+            f"  * Response classification: {n_refusals} refusals, {n_comply} compliant"
+        )
+
+        if n_refusals < 10 or n_comply < 10:
+            print(
+                f"[yellow]Warning: Imbalanced classes (refusals={n_refusals}, comply={n_comply}). "
+                f"Falling back to PCA extraction.[/yellow]"
+            )
+            return self.get_refusal_directions_pca(
+                good_residuals, bad_residuals, n_components=1
+            )
+
+        # Separate residuals by actual behavior
+        refusal_residuals = bad_residuals[refusal_mask]
+        comply_residuals = torch.cat(
+            [
+                good_residuals,
+                bad_residuals[~refusal_mask],
+            ],
+            dim=0,
+        )
+
+        print(f"  * Training {n_layers} layer probes...")
+
+        for layer_idx in range(n_layers):
+            probe = RefusalProbe(hidden_dim, device=str(device))
+            accuracy = probe.fit(refusal_residuals, comply_residuals, layer_idx)
+            accuracies.append(accuracy)
+            directions.append(probe.weights)
+
+        mean_acc = sum(accuracies) / len(accuracies)
+        min_acc = min(accuracies)
+        max_acc = max(accuracies)
+
+        print(
+            f"  * Probe accuracies: min={min_acc:.2f}, max={max_acc:.2f}, mean={mean_acc:.2f}"
+        )
+
+        # Check accuracy threshold - fall back to PCA if too low
+        if mean_acc < min_probe_accuracy:
+            print(
+                f"[yellow]Warning: Mean probe accuracy ({mean_acc:.2f}) below threshold "
+                f"({min_probe_accuracy}). Falling back to PCA extraction.[/yellow]"
+            )
+            return self.get_refusal_directions_pca(
+                good_residuals, bad_residuals, n_components=1
+            )
+
+        return SupervisedExtractionResult(
+            directions=torch.stack(directions),
+            accuracies=accuracies,
+        )
+
+    # Phase 3: Activation-Scaled Weight Calibration
+    def compute_refusal_activation_stats(
+        self,
+        refusal_directions: Tensor,
+        bad_residuals: Tensor,
+        target_layer_frac: float = 0.6,
+    ) -> RefusalActivationStats:
+        """Compute statistics about refusal activations for weight calibration.
+
+        Measures how strongly the bad prompts activate the refusal direction,
+        which can be used to calibrate ablation weights appropriately.
+
+        Args:
+            refusal_directions: Refusal directions, shape (n_layers, hidden_dim)
+            bad_residuals: Residuals from harmful prompts,
+                shape (n_prompts, n_layers, hidden_dim)
+            target_layer_frac: Which layer to measure (as fraction of total layers).
+                Default 0.6 targets middle-to-late layers where refusal is typically strongest.
+
+        Returns:
+            RefusalActivationStats with projection statistics
+        """
+        n_layers = bad_residuals.shape[1]
+        target_layer = int(n_layers * target_layer_frac)
+        target_layer = min(target_layer, n_layers - 1)  # Clamp to valid range
+
+        # Get direction at target layer
+        direction = refusal_directions[target_layer]
+
+        # Compute projections for all prompts (vectorized)
+        layer_residuals = bad_residuals[:, target_layer, :]  # (n_prompts, hidden_dim)
+        projections = torch.abs(
+            torch.matmul(layer_residuals, direction)  # (n_prompts,)
+        )
+
+        # Convert to numpy for percentile calculation
+        projections_np = projections.cpu().numpy()
+
+        return RefusalActivationStats(
+            mean_projection=float(projections_np.mean()),
+            std_projection=float(projections_np.std()),
+            percentile_25=float(np.percentile(projections_np, 25)),
+            percentile_75=float(np.percentile(projections_np, 75)),
+            percentile_95=float(np.percentile(projections_np, 95)),
+            n_samples=len(projections_np),
+            target_layer=target_layer,
+        )
+
+    def compute_calibrated_weight(
+        self,
+        stats: RefusalActivationStats,
+        base_weight: float = 1.0,
+        target_percentile: float = 0.75,
+        min_factor: float = 0.5,
+        max_factor: float = 2.0,
+    ) -> float:
+        """Compute calibrated ablation weight based on activation statistics.
+
+        The idea: instead of fixed weights, scale based on how strongly refusal
+        activations appear in this specific model/prompt combination.
+
+        The calibration factor is computed as: target_percentile_value / mean_projection
+        - Higher percentile (e.g., 0.95) → targets stronger activations → higher weight
+        - Lower percentile (e.g., 0.5) → targets average activations → weight ≈ 1.0
+        - Lower percentile (e.g., 0.25) → targets weaker activations → lower weight
+
+        Args:
+            stats: Activation statistics from compute_refusal_activation_stats
+            base_weight: Starting weight before calibration (default 1.0)
+            target_percentile: Which percentile of activations to target.
+                Higher = more aggressive ablation (scales up weight).
+                Lower = more conservative ablation (scales down weight).
+            min_factor: Minimum calibration factor (prevents under-ablation)
+            max_factor: Maximum calibration factor (prevents over-ablation)
+
+        Returns:
+            Calibrated weight = base_weight * calibration_factor
+        """
+        # Get target value from statistics
+        target_value = stats.get_percentile_value(target_percentile)
+
+        # Compute calibration factor
+        # Scale weight inversely to activation strength relative to mean
+        if stats.mean_projection > 1e-8:
+            calibration_factor = target_value / stats.mean_projection
+        else:
+            # If mean projection is near zero, refusal direction may be weak
+            calibration_factor = 1.0
+
+        # Clamp to reasonable range to prevent extreme values
+        calibration_factor = max(min_factor, min(max_factor, calibration_factor))
+
+        return base_weight * calibration_factor
+
+    def get_calibrated_parameters(
+        self,
+        parameters: dict[str, "AbliterationParameters"],
+        stats: RefusalActivationStats,
+        target_percentile: float = 0.75,
+        min_factor: float = 0.5,
+        max_factor: float = 2.0,
+    ) -> dict[str, "AbliterationParameters"]:
+        """Apply activation-based calibration to abliteration parameters.
+
+        Scales the max_weight and min_weight of each component based on
+        the computed activation statistics.
+
+        Args:
+            parameters: Original abliteration parameters per component
+            stats: Activation statistics from compute_refusal_activation_stats
+            target_percentile: Which percentile of activations to target
+            min_factor: Minimum calibration factor
+            max_factor: Maximum calibration factor
+
+        Returns:
+            New dict of AbliterationParameters with calibrated weights
+        """
+        calibration_factor = self.compute_calibrated_weight(
+            stats,
+            base_weight=1.0,
+            target_percentile=target_percentile,
+            min_factor=min_factor,
+            max_factor=max_factor,
+        )
+
+        print(
+            f"  * Activation calibration: factor={calibration_factor:.3f} "
+            f"(target_percentile={target_percentile}, "
+            f"mean_proj={stats.mean_projection:.4f}, "
+            f"p75={stats.percentile_75:.4f})"
+        )
+
+        calibrated_parameters = {}
+        for component, params in parameters.items():
+            calibrated_parameters[component] = AbliterationParameters(
+                max_weight=params.max_weight * calibration_factor,
+                max_weight_position=params.max_weight_position,
+                min_weight=params.min_weight * calibration_factor,
+                min_weight_distance=params.min_weight_distance,
+            )
+
+        return calibrated_parameters
+
+    # Phase 4: Concept Cones Clustering
+    def get_refusal_directions_concept_cones(
+        self,
+        good_residuals: Tensor,
+        bad_residuals: Tensor,
+        n_cones: int = 5,
+        min_cone_size: int = 10,
+        directions_per_cone: int = 2,
+        min_silhouette_score: float = 0.1,
+    ) -> ConceptConeExtractionResult | PCAExtractionResult:
+        """Extract refusal directions using concept cone clustering.
+
+        Clusters harmful prompts by their residual patterns to identify
+        different categories of harmful content (e.g., violence, fraud,
+        self-harm), then extracts category-specific refusal directions.
+
+        Falls back to standard PCA if:
+        - Not enough samples for clustering
+        - Silhouette score below threshold (poor clustering quality)
+
+        Args:
+            good_residuals: Residuals from harmless prompts
+                Shape: (n_good, n_layers, hidden_dim)
+            bad_residuals: Residuals from harmful prompts
+                Shape: (n_bad, n_layers, hidden_dim)
+            n_cones: Number of concept cones to extract
+            min_cone_size: Minimum prompts required per cone
+            directions_per_cone: Number of PCA directions per cone
+            min_silhouette_score: Minimum clustering quality score
+
+        Returns:
+            ConceptConeExtractionResult if successful,
+            or PCAExtractionResult if fallback to global directions
+        """
+        print("  * Extracting concept cones...")
+
+        extractor = ConceptConeExtractor(
+            n_cones=n_cones,
+            n_directions_per_cone=directions_per_cone,
+            min_cluster_size=min_cone_size,
+            min_silhouette_score=min_silhouette_score,
+        )
+
+        result = extractor.extract(good_residuals, bad_residuals, self)
+
+        # Check if clustering quality is acceptable
+        if (
+            result.silhouette_score < min_silhouette_score
+            and result.n_clusters_valid > 1
+        ):
+            print(
+                f"[yellow]Warning: Silhouette score ({result.silhouette_score:.3f}) "
+                f"below threshold ({min_silhouette_score}). "
+                f"Falling back to global PCA directions.[/yellow]"
+            )
+            return self.get_refusal_directions_pca(
+                good_residuals, bad_residuals, n_components=directions_per_cone
+            )
+
+        # Check if we have any valid cones
+        if not result.cones:
+            print(
+                "[yellow]Warning: No valid concept cones extracted. "
+                "Falling back to global PCA directions.[/yellow]"
+            )
+            return self.get_refusal_directions_pca(
+                good_residuals, bad_residuals, n_components=directions_per_cone
+            )
+
+        return result
+
+    def abliterate_concept_cones(
+        self,
+        cone_result: "ConceptConeExtractionResult",
+        parameters: dict[str, "AbliterationParameters"],
+        direction_weights: list[float] | None = None,
+        layer_profiles: list["LayerRangeProfile"] | None = None,
+    ) -> None:
+        """Abliterate using concept cone-specific directions.
+
+        Applies ablation for each concept cone's primary direction,
+        weighted by the cone's size (number of prompts).
+
+        Args:
+            cone_result: Result from get_refusal_directions_concept_cones
+            parameters: Abliteration parameters for each component
+            direction_weights: Optional weights for each direction component.
+                If None, uses first direction only for each cone.
+            layer_profiles: Optional per-layer weight profiles
+        """
+        if not cone_result.cones:
+            print("[yellow]Warning: No concept cones to abliterate.[/yellow]")
+            return
+
+        total_size = sum(cone.size for cone in cone_result.cones)
+
+        print(f"  * Abliterating {len(cone_result.cones)} concept cones...")
+
+        for cone in cone_result.cones:
+            # Weight by relative size of this cone
+            cone_weight = cone.size / total_size if total_size > 0 else 1.0
+
+            print(
+                f"    * Cone {cone.cluster_id}: size={cone.size}, "
+                f"weight={cone_weight:.2f}"
+            )
+
+            # Scale parameters by cone weight
+            scaled_parameters = {}
+            for component, params in parameters.items():
+                scaled_parameters[component] = AbliterationParameters(
+                    max_weight=params.max_weight * cone_weight,
+                    max_weight_position=params.max_weight_position,
+                    min_weight=params.min_weight * cone_weight,
+                    min_weight_distance=params.min_weight_distance,
+                )
+
+            # Use the primary direction for this cone
+            # cone.directions has shape (n_layers, n_components, hidden_dim)
+            if direction_weights is None:
+                # Use first direction only
+                primary_direction = cone.directions[:, 0, :]
+                self.abliterate(
+                    primary_direction, None, scaled_parameters, layer_profiles
+                )
+            else:
+                # Use multiple directions with weights
+                self.abliterate_multi_direction(
+                    cone.directions,
+                    direction_weights,
+                    scaled_parameters,
+                    layer_profiles,
+                )
+
+    def get_refusal_directions_ensemble(
+        self,
+        good_residuals: Tensor,
+        bad_residuals: Tensor,
+        bad_prompts: list[str],
+        evaluator: "Evaluator",
+        probe_weight: float = 0.7,
+        pca_weight: float = 0.3,
+        min_probe_accuracy: float = 0.65,
+    ) -> Tensor:
+        """Extract refusal directions using ensemble of supervised probe and PCA.
+
+        Combines the strengths of both approaches:
+        - Supervised probe: directly learns the refuse/comply decision boundary
+        - PCA: finds directions of maximum variance difference
+
+        Raises RuntimeError if supervised probing fails (class imbalance or low accuracy).
+
+        Args:
+            good_residuals: Residuals from harmless prompts
+            bad_residuals: Residuals from harmful prompts
+            bad_prompts: List of bad prompts (must match bad_residuals length)
+            evaluator: Evaluator instance for refusal detection
+            probe_weight: Weight for supervised probe direction (default 0.7)
+            pca_weight: Weight for PCA direction (default 0.3)
+            min_probe_accuracy: Minimum accuracy for supervised probe
+
+        Returns:
+            Ensemble directions tensor of shape (n_layers, hidden_dim)
+
+        Raises:
+            RuntimeError: If supervised probing fails due to class imbalance or low accuracy
+        """
+        # Normalize weights to sum to 1.0
+        total_weight = probe_weight + pca_weight
+        if total_weight != 1.0:
+            probe_weight = probe_weight / total_weight
+            pca_weight = pca_weight / total_weight
+
+        # Get PCA directions (always computed)
+        pca_result = self.get_refusal_directions_pca(
+            good_residuals, bad_residuals, n_components=1
+        )
+        pca_directions = pca_result.directions[:, 0, :]  # Shape: (n_layers, hidden_dim)
+
+        # Try supervised directions
+        supervised_result = self.get_refusal_directions_supervised(
+            good_residuals, bad_residuals, bad_prompts, evaluator, min_probe_accuracy
+        )
+
+        # Check if supervised probing succeeded or fell back to PCA
+        if isinstance(supervised_result, PCAExtractionResult):
+            raise RuntimeError(
+                "Ensemble probe+PCA extraction failed: supervised probing returned PCA fallback. "
+                "This happens when there is class imbalance (< 10 samples per class) or "
+                f"probe accuracy is below {min_probe_accuracy}. Check that your bad_prompts "
+                "dataset contains prompts that trigger refusals."
+            )
+
+        supervised_directions = supervised_result.directions
+
+        # Weighted combination
+        ensemble_directions = (
+            probe_weight * supervised_directions + pca_weight * pca_directions
+        )
+
+        # Re-normalize after combination
+        ensemble_directions = F.normalize(ensemble_directions, p=2, dim=-1)
+
+        print(
+            f"  * Ensemble directions: probe_weight={probe_weight:.2f}, pca_weight={pca_weight:.2f}"
+        )
+
+        return ensemble_directions
+
+    # Phase 5: Contrastive Activation Addition (CAA)
+    def extract_compliance_direction(
+        self,
+        compliant_residuals: Tensor,
+        refusing_residuals: Tensor,
+    ) -> Tensor:
+        """Extract a direction that encodes 'compliance' behavior.
+
+        This is conceptually the OPPOSITE of the refusal direction, but computed
+        from different data (actual compliance vs refusal responses). The compliance
+        direction points from "refused" to "complied" in activation space.
+
+        Args:
+            compliant_residuals: Residuals from prompts where model complied
+                Shape: (n_comply, n_layers, hidden_dim)
+            refusing_residuals: Residuals from prompts where model refused
+                Shape: (n_refuse, n_layers, hidden_dim)
+
+        Returns:
+            Compliance direction tensor of shape (n_layers, hidden_dim)
+        """
+        compliance_direction = F.normalize(
+            compliant_residuals.mean(dim=0) - refusing_residuals.mean(dim=0),
+            p=2,
+            dim=-1,  # Normalize across hidden_dim
+        )
+        return compliance_direction
+
+    def abliterate_with_caa(
+        self,
+        refusal_directions: Tensor,
+        compliance_direction: Tensor,
+        parameters: dict[str, "AbliterationParameters"],
+        removal_strength: float = 1.0,
+        addition_strength: float = 0.3,
+        max_overlap: float = 0.5,
+        layer_profiles: list["LayerRangeProfile"] | None = None,
+    ) -> bool:
+        """Combined ablation: remove refusal direction + add compliance direction.
+
+        This implements Contrastive Activation Addition (CAA) which:
+        1. Removes the refusal direction (standard ablation)
+        2. Adds a compliance direction to encourage helpful behavior
+
+        WARNING: Addition may partially undo removal if directions aren't orthogonal.
+        The method checks cosine similarity and skips addition if overlap is too high.
+
+        Args:
+            refusal_directions: Refusal directions to remove
+                Shape: (n_layers, hidden_dim) or (n_layers, n_components, hidden_dim)
+            compliance_direction: Compliance direction to add
+                Shape: (n_layers, hidden_dim)
+            parameters: Abliteration parameters per component
+            removal_strength: Multiplier for refusal direction removal (default 1.0)
+            addition_strength: Multiplier for compliance direction addition (default 0.3)
+            max_overlap: Maximum allowed cosine similarity (default 0.5)
+            layer_profiles: Optional per-layer weight profiles
+
+        Returns:
+            True if CAA addition was applied, False if skipped due to high overlap
+        """
+        # Handle both single-direction and multi-direction refusal tensors
+        if refusal_directions.dim() == 2:
+            # Single direction: (n_layers, hidden_dim)
+            refusal_for_sim = refusal_directions
+        else:
+            # Multi-direction: (n_layers, n_components, hidden_dim) - use first component
+            refusal_for_sim = refusal_directions[:, 0, :]
+
+        # Check orthogonality between refusal and compliance directions
+        cosine_sim = (
+            F.cosine_similarity(
+                refusal_for_sim,
+                compliance_direction,
+                dim=-1,
+            )
+            .mean()
+            .item()
+        )
+
+        print(f"  * CAA: Refusal-compliance cosine similarity: {cosine_sim:.3f}")
+
+        caa_applied = True
+        if abs(cosine_sim) > max_overlap:
+            print(
+                f"[yellow]Warning: High direction overlap (|cosine|={abs(cosine_sim):.2f} > {max_overlap}). "
+                f"Skipping CAA addition to prevent undoing ablation.[/yellow]"
+            )
+            caa_applied = False
+
+        # Step 1: Remove refusal direction (standard ablation)
+        # Scale parameters by removal_strength
+        if removal_strength != 1.0:
+            scaled_parameters = {}
+            for component, params in parameters.items():
+                scaled_parameters[component] = AbliterationParameters(
+                    max_weight=params.max_weight * removal_strength,
+                    max_weight_position=params.max_weight_position,
+                    min_weight=params.min_weight * removal_strength,
+                    min_weight_distance=params.min_weight_distance,
+                )
+        else:
+            scaled_parameters = parameters
+
+        # Handle multi-direction vs single-direction
+        if refusal_directions.dim() == 3:
+            # Multi-direction: use first component (primary direction)
+            self.abliterate(
+                refusal_directions[:, 0, :],
+                None,  # Per-layer mode
+                scaled_parameters,
+                layer_profiles=layer_profiles,
+            )
+        else:
+            # Single direction
+            self.abliterate(
+                refusal_directions,
+                None,  # Per-layer mode
+                scaled_parameters,
+                layer_profiles=layer_profiles,
+            )
+
+        # Step 2: Add compliance direction (only if overlap is acceptable)
+        if caa_applied:
+            print(
+                f"  * CAA: Adding compliance direction (strength={addition_strength:.2f})"
+            )
+
+            num_layers = len(self.get_layers())
+
+            for layer_idx in range(num_layers):
+                layer = self.get_layers()[layer_idx]
+
+                # Get layer-specific compliance direction
+                compliance_dir = compliance_direction[layer_idx]
+
+                # Compute projector for this direction
+                projector = torch.outer(
+                    compliance_dir,
+                    compliance_dir,
+                ).to(self.model.dtype)
+
+                # Apply layer multiplier if profiles are provided
+                layer_multiplier = self.get_layer_multiplier(
+                    layer_idx, num_layers, layer_profiles
+                )
+                effective_strength = addition_strength * layer_multiplier
+
+                # Add to attention output projection
+                # This encourages the model to produce compliance-like activations
+                o_proj = layer.self_attn.o_proj.weight
+                device_projector = projector.to(o_proj.device)
+
+                # In-place addition: W += strength * (projector @ W)
+                # This biases the output toward the compliance direction
+                o_proj.data.add_(effective_strength * (device_projector @ o_proj.data))
+
+                # Clean up periodically
+                if layer_idx % 8 == 7:
+                    empty_cache()
+
+        return caa_applied
+
+    def get_compliance_directions_from_responses(
+        self,
+        bad_prompts: list[str],
+        bad_residuals: Tensor,
+        evaluator: "Evaluator",
+    ) -> tuple[Tensor, Tensor] | None:
+        """Generate responses and separate into compliant vs refusing for CAA.
+
+        This method generates responses to bad prompts and uses the evaluator
+        to classify them as compliant or refusing, then returns the corresponding
+        residuals separated into two groups.
+
+        Args:
+            bad_prompts: List of harmful prompts
+            bad_residuals: Residuals from harmful prompts
+                Shape: (n_bad, n_layers, hidden_dim)
+            evaluator: Evaluator instance for refusal detection
+
+        Returns:
+            Tuple of (compliant_residuals, refusing_residuals), or None if
+            there aren't enough samples in each category (< 10)
+        """
+        # Validate alignment
+        if len(bad_prompts) != bad_residuals.shape[0]:
+            print(
+                f"[yellow]Warning: Prompt count ({len(bad_prompts)}) != residual count "
+                f"({bad_residuals.shape[0]}). Using first {min(len(bad_prompts), bad_residuals.shape[0])} samples.[/yellow]"
+            )
+            n_samples = min(len(bad_prompts), bad_residuals.shape[0])
+            bad_prompts = bad_prompts[:n_samples]
+            bad_residuals = bad_residuals[:n_samples]
+
+        print("  * CAA: Generating responses to classify compliance behavior...")
+        bad_responses = self.get_responses_batched(bad_prompts)
+
+        # Classify responses
+        refusal_mask = torch.tensor(
+            [evaluator.is_refusal(r) for r in bad_responses],
+            dtype=torch.bool,
+            device=bad_residuals.device,
+        )
+
+        n_refusals = int(refusal_mask.sum().item())
+        n_comply = len(refusal_mask) - n_refusals
+
+        print(
+            f"  * CAA: Response classification: {n_refusals} refusals, {n_comply} compliant"
+        )
+
+        if n_refusals < 10 or n_comply < 10:
+            print(
+                f"[yellow]Warning: Insufficient samples for CAA "
+                f"(refusals={n_refusals}, comply={n_comply}, need 10+ each). "
+                f"Skipping CAA.[/yellow]"
+            )
+            return None
+
+        compliant_residuals = bad_residuals[~refusal_mask]
+        refusing_residuals = bad_residuals[refusal_mask]
+
+        return compliant_residuals, refusing_residuals
+
+    # Phase 6: Circuit-Level Ablation
+    def is_gqa_model(self) -> tuple[bool, int, int]:
+        """Check if the model uses Grouped Query Attention (GQA).
+
+        GQA models have fewer key-value heads than query heads, which makes
+        circuit-level ablation more complex and potentially incompatible.
+
+        Returns:
+            Tuple of (is_gqa, n_heads, n_kv_heads)
+        """
+        n_heads = getattr(self.model.config, "num_attention_heads", 32)
+        n_kv_heads = getattr(self.model.config, "num_key_value_heads", n_heads)
+
+        return n_kv_heads != n_heads, n_heads, n_kv_heads
+
+    def discover_refusal_circuits(
+        self,
+        refusal_directions: Tensor,
+        n_circuits: int = 20,
+        importance_threshold: float = 0.1,
+    ) -> list[RefusalCircuit]:
+        """Discover attention heads that mediate refusal behavior.
+
+        Uses a simplified heuristic based on the alignment between attention
+        head output projections and the refusal direction. Heads whose output
+        projections are highly aligned with the refusal direction are likely
+        to be mediating refusal behavior.
+
+        Note: This is a simplified approach. Full circuit discovery would require
+        activation patching with TransformerLens or similar infrastructure.
+
+        Args:
+            refusal_directions: Refusal directions, shape (n_layers, hidden_dim)
+            n_circuits: Maximum number of circuits to return
+            importance_threshold: Minimum importance score to include
+
+        Returns:
+            List of RefusalCircuit objects, sorted by importance descending
+        """
+        is_gqa, n_heads, n_kv_heads = self.is_gqa_model()
+
+        if is_gqa:
+            print(
+                f"[yellow]Warning: GQA model detected (n_heads={n_heads}, "
+                f"n_kv_heads={n_kv_heads}). Circuit discovery may be inaccurate.[/yellow]"
+            )
+
+        circuits: list[RefusalCircuit] = []
+        num_layers = len(self.get_layers())
+
+        for layer_idx in range(num_layers):
+            layer = self.get_layers()[layer_idx]
+            o_proj = layer.self_attn.o_proj.weight
+
+            hidden_dim = o_proj.shape[0]
+            head_dim = hidden_dim // n_heads
+
+            # Get refusal direction for this layer
+            direction = refusal_directions[layer_idx].to(o_proj.device)
+
+            for head_idx in range(n_heads):
+                start_idx = head_idx * head_dim
+                end_idx = start_idx + head_dim
+
+                if end_idx > hidden_dim:
+                    continue
+
+                # Get the output projection weights for this head
+                head_weights = o_proj[start_idx:end_idx, :]
+
+                # Compute alignment with refusal direction
+                # Higher alignment means this head's output is more aligned with refusal
+                head_direction = direction[start_idx:end_idx]
+                head_direction_norm = F.normalize(head_direction.float(), p=2, dim=0)
+
+                # Compute mean alignment of head's output weights with refusal direction
+                weights_norm = F.normalize(head_weights.float(), p=2, dim=0)
+                alignment = (
+                    torch.abs(torch.matmul(head_direction_norm, weights_norm))
+                    .mean()
+                    .item()
+                )
+
+                if alignment >= importance_threshold:
+                    circuits.append(
+                        RefusalCircuit(
+                            layer_idx=layer_idx,
+                            head_idx=head_idx,
+                            importance=alignment,
+                        )
+                    )
+
+        # Sort by importance and take top n_circuits
+        circuits.sort(key=lambda c: c.importance, reverse=True)
+        circuits = circuits[:n_circuits]
+
+        print(
+            f"  * Discovered {len(circuits)} refusal circuits "
+            f"(threshold={importance_threshold}, max={n_circuits})"
+        )
+
+        if circuits:
+            top_circuit = circuits[0]
+            print(
+                f"    * Top circuit: layer={top_circuit.layer_idx}, "
+                f"head={top_circuit.head_idx}, importance={top_circuit.importance:.3f}"
+            )
+
+        return circuits
+
+    def abliterate_circuits(
+        self,
+        circuits: list[RefusalCircuit],
+        refusal_directions: Tensor,
+        ablation_strength: float = 1.0,
+    ) -> CircuitAblationResult:
+        """Abliterate only specific attention heads, not entire layers.
+
+        This is a more surgical approach to ablation that targets individual
+        attention heads identified as mediating refusal behavior. This can
+        potentially reduce capability damage compared to full-layer ablation.
+
+        WARNING: This method is NOT supported for GQA (Grouped Query Attention)
+        models like Qwen2.5 and Llama 3.x. It will detect GQA and skip ablation.
+
+        Args:
+            circuits: List of RefusalCircuit objects to ablate
+            refusal_directions: Refusal directions, shape (n_layers, hidden_dim)
+            ablation_strength: Base ablation strength multiplier (default 1.0)
+
+        Returns:
+            CircuitAblationResult with ablation statistics
+        """
+        # Check for GQA and skip if detected
+        is_gqa, n_heads, n_kv_heads = self.is_gqa_model()
+
+        if is_gqa:
+            print(
+                f"[yellow]Warning: GQA model detected "
+                f"(n_heads={n_heads}, n_kv_heads={n_kv_heads}).[/yellow]"
+            )
+            print(
+                "[yellow]Circuit ablation is not supported for GQA models. "
+                "Skipping circuit-level ablation.[/yellow]"
+            )
+            return CircuitAblationResult(
+                circuits_ablated=0,
+                circuits_skipped=len(circuits),
+                gqa_detected=True,
+                n_heads=n_heads,
+                n_kv_heads=n_kv_heads,
+            )
+
+        if not circuits:
+            print("[yellow]Warning: No circuits provided for ablation.[/yellow]")
+            return CircuitAblationResult(
+                circuits_ablated=0,
+                circuits_skipped=0,
+                gqa_detected=False,
+                n_heads=n_heads,
+                n_kv_heads=n_kv_heads,
+            )
+
+        print(f"  * Abliterating {len(circuits)} circuits...")
+
+        circuits_ablated = 0
+        circuits_skipped = 0
+        num_layers = len(self.get_layers())
+
+        for circuit in circuits:
+            # Validate layer index
+            if circuit.layer_idx < 0 or circuit.layer_idx >= num_layers:
+                print(
+                    f"[red]Error: Layer {circuit.layer_idx} out of bounds "
+                    f"(0-{num_layers - 1}). Skipping circuit.[/red]"
+                )
+                circuits_skipped += 1
+                continue
+
+            layer = self.get_layers()[circuit.layer_idx]
+            o_proj = layer.self_attn.o_proj.weight
+
+            hidden_dim = o_proj.shape[0]
+            head_dim = hidden_dim // n_heads
+
+            # Compute head-specific indices
+            start_idx = circuit.head_idx * head_dim
+            end_idx = start_idx + head_dim
+
+            # Validate head indices
+            if circuit.head_idx < 0 or circuit.head_idx >= n_heads:
+                print(
+                    f"[red]Error: Head {circuit.head_idx} out of bounds "
+                    f"(0-{n_heads - 1}) for layer {circuit.layer_idx}. "
+                    f"Skipping circuit.[/red]"
+                )
+                circuits_skipped += 1
+                continue
+
+            if end_idx > hidden_dim:
+                print(
+                    f"[red]Error: Head {circuit.head_idx} indices "
+                    f"({start_idx}:{end_idx}) exceed hidden_dim ({hidden_dim}). "
+                    f"Skipping circuit.[/red]"
+                )
+                circuits_skipped += 1
+                continue
+
+            # Get refusal direction for this layer
+            direction = refusal_directions[circuit.layer_idx].to(o_proj.device)
+
+            # Compute effective ablation strength
+            strength = ablation_strength * circuit.importance
+
+            # Project direction to head subspace
+            head_direction = direction[start_idx:end_idx]
+            head_direction = F.normalize(head_direction, p=2, dim=0)
+
+            # Create projector for this head's subspace
+            projector = torch.outer(head_direction, head_direction).to(o_proj.dtype)
+
+            # Ablate only this head's contribution
+            # o_proj[start_idx:end_idx, :] -= strength * (projector @ o_proj[start_idx:end_idx, :])
+            head_weights = o_proj.data[start_idx:end_idx, :]
+            o_proj.data[start_idx:end_idx, :] = head_weights - strength * (
+                projector @ head_weights
+            )
+
+            circuits_ablated += 1
+
+        # Clean up
+        empty_cache()
+
+        print(
+            f"  * Circuit ablation complete: {circuits_ablated} ablated, "
+            f"{circuits_skipped} skipped"
+        )
+
+        return CircuitAblationResult(
+            circuits_ablated=circuits_ablated,
+            circuits_skipped=circuits_skipped,
+            gqa_detected=False,
+            n_heads=n_heads,
+            n_kv_heads=n_kv_heads,
+        )
+
+    def save_circuits_to_cache(
+        self,
+        circuits: list[RefusalCircuit],
+        cache_path: str,
+    ) -> None:
+        """Save discovered circuits to a JSON cache file.
+
+        Args:
+            circuits: List of RefusalCircuit objects to save
+            cache_path: Path to the JSON cache file
+        """
+        import json
+
+        cache_data = {
+            "model": self.settings.model,
+            "circuits": [
+                {
+                    "layer_idx": c.layer_idx,
+                    "head_idx": c.head_idx,
+                    "importance": c.importance,
+                }
+                for c in circuits
+            ],
+        }
+
+        with open(cache_path, "w") as f:
+            json.dump(cache_data, f, indent=2)
+
+        print(f"  * Saved {len(circuits)} circuits to {cache_path}")
+
+    def load_circuits_from_cache(
+        self,
+        cache_path: str,
+    ) -> list[RefusalCircuit] | None:
+        """Load circuits from a JSON cache file.
+
+        Args:
+            cache_path: Path to the JSON cache file
+
+        Returns:
+            List of RefusalCircuit objects, or None if cache doesn't exist
+            or is for a different model
+        """
+        import json
+        import os
+
+        if not os.path.exists(cache_path):
+            return None
+
+        try:
+            with open(cache_path, "r") as f:
+                cache_data = json.load(f)
+
+            # Verify model matches
+            if cache_data.get("model") != self.settings.model:
+                print(
+                    f"[yellow]Warning: Circuit cache is for model "
+                    f"'{cache_data.get('model')}', not '{self.settings.model}'. "
+                    f"Ignoring cache.[/yellow]"
+                )
+                return None
+
+            circuits = [
+                RefusalCircuit(
+                    layer_idx=c["layer_idx"],
+                    head_idx=c["head_idx"],
+                    importance=c["importance"],
+                )
+                for c in cache_data.get("circuits", [])
+            ]
+
+            print(f"  * Loaded {len(circuits)} circuits from cache: {cache_path}")
+            return circuits
+
+        except (json.JSONDecodeError, KeyError) as e:
+            print(
+                f"[yellow]Warning: Failed to load circuit cache: {e}. "
+                f"Will rediscover circuits.[/yellow]"
+            )
+            return None
+
+    def get_or_discover_circuits(
+        self,
+        refusal_directions: Tensor,
+        n_circuits: int = 20,
+        importance_threshold: float = 0.1,
+        cache_path: str | None = None,
+    ) -> list[RefusalCircuit]:
+        """Get circuits from cache or discover them.
+
+        Convenience method that checks the cache first, and if not found,
+        discovers circuits and optionally saves them to cache.
+
+        Args:
+            refusal_directions: Refusal directions for circuit discovery
+            n_circuits: Maximum number of circuits to discover
+            importance_threshold: Minimum importance score
+            cache_path: Optional path to cache file
+
+        Returns:
+            List of RefusalCircuit objects
+        """
+        # Try loading from cache
+        if cache_path is not None:
+            circuits = self.load_circuits_from_cache(cache_path)
+            if circuits is not None:
+                return circuits
+
+        # Discover circuits
+        circuits = self.discover_refusal_circuits(
+            refusal_directions,
+            n_circuits=n_circuits,
+            importance_threshold=importance_threshold,
+        )
+
+        # Save to cache if path provided
+        if cache_path is not None and circuits:
+            self.save_circuits_to_cache(circuits, cache_path)
+
+        return circuits
 
     def stream_chat_response(self, chat: list[dict[str, str]]) -> str:
         chat_prompt: str = self.tokenizer.apply_chat_template(

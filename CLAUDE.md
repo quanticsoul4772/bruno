@@ -104,6 +104,25 @@ Heretic is a tool for **neural behavior modification** in language models using 
 
 **Vision:** A personal neural engineering workbench for understanding and reshaping LLM behavior at the weight level. See [ROADMAP.md](ROADMAP.md) for full vision.
 
+### Phase 1-7 Advanced Improvements (NEW)
+
+Heretic now includes 7 phases of advanced abliteration improvements:
+
+| Phase | Feature | Default | Description |
+|-------|---------|---------|-------------|
+| 1 | Neural Refusal Detection | ✅ ON | Zero-shot NLI for detecting soft refusals |
+| 2 | Supervised Probing + Ensemble | ✅ ON | Linear probes combined with PCA |
+| 3 | Activation Calibration | ✅ ON | Scale weights based on activation strength |
+| 4 | Concept Cones | OFF | Cluster harmful prompts by category |
+| 5 | CAA (Contrastive Activation Addition) | OFF | Add compliance direction |
+| 6 | Circuit-Level Ablation | OFF | Target specific attention heads (⚠️ No GQA) |
+| 7 | Warm-Start Transfer | ✅ ON | Model family profiles for faster Optuna |
+
+**Key files for advanced features:**
+- `src/heretic/model.py` - All Phase 1-7 implementations
+- `src/heretic/config.py` - 50+ configuration settings
+- `src/heretic/transfer.py` - Model family profiles for warm-start
+
 ## Build and Development Commands
 
 ```bash
@@ -144,9 +163,22 @@ uv build
 - `get_layer_matrices()`: Extracts abliterable weight matrices (attn.o_proj, mlp.down_proj) supporting dense and MoE variants
 - `abliterate()`: Applies orthogonalization with per-layer weight interpolation
 - `get_residuals_batched()`: Extracts hidden states for refusal direction computation
+- **Phase 1-7 Methods:**
+  - `get_refusal_directions_pca()`: Multi-direction contrastive PCA extraction
+  - `get_refusal_directions_supervised()`: Train linear probes per layer
+  - `get_refusal_directions_ensemble()`: Combine probe + PCA directions
+  - `compute_refusal_activation_stats()`: Activation statistics for calibration
+  - `get_calibrated_parameters()`: Apply activation-based weight scaling
+  - `get_refusal_directions_concept_cones()`: Category-specific directions via clustering
+  - `abliterate_concept_cones()`: Weighted cone-specific ablation
+  - `extract_compliance_direction()`: Compliance direction for CAA
+  - `abliterate_with_caa()`: Combined removal + addition
+  - `discover_refusal_circuits()`: Find refusal-mediating attention heads
+  - `abliterate_circuits()`: Head-specific ablation (non-GQA only)
 - **Performance optimizations:**
   - In-memory weight caching: Caches original `state_dict` for fast reset (~5-10x faster than reloading from disk)
   - Optional `torch.compile()` support for ~1.5-2x inference speedup
+  - Memory leak fix: `device_projectors_cache` cleared after abliteration
 
 **`Evaluator` (`src/heretic/evaluator.py`)**
 - Computes KL divergence from first-token probability distributions
@@ -159,6 +191,21 @@ uv build
 **`Settings` (`src/heretic/config.py`)**
 - Pydantic-based configuration with layered sources: CLI args > env vars > config.toml
 - Key settings: `n_trials`, `batch_size`, `dtypes`, `refusal_markers`
+- **Phase 1-7 settings (50+ total):**
+  - Neural detection: `use_neural_refusal_detection`, `neural_detection_for_optuna`
+  - Supervised probing: `use_supervised_probing`, `ensemble_probe_pca`, `min_probe_accuracy`
+  - Activation calibration: `use_activation_calibration`, `activation_target_percentile`
+  - Concept cones: `use_concept_cones`, `n_concept_cones`, `min_cone_size`
+  - CAA: `use_caa`, `caa_addition_strength`, `caa_max_overlap`
+  - Circuit ablation: `use_circuit_ablation`, `n_refusal_circuits` (⚠️ No GQA support)
+  - Warm-start: `use_warm_start_params`, `model_family`, `warm_start_n_trials`
+  - Validation: `enable_validation`, `run_mmlu_validation`
+
+**`transfer.py` (`src/heretic/transfer.py`)** (NEW)
+- Model family profiles for warm-start parameter initialization
+- Profiles for: llama, qwen, mistral, gemma, phi
+- `get_warm_start_params()`: Generate Optuna warm-start trials
+- `detect_model_family()`: Auto-detect model family from name
 
 ### Key Directories
 - `src/heretic/` - Core abliteration logic
@@ -181,6 +228,18 @@ Key parameters in `config.toml`:
 - `refusal_check_tokens`: Tokens to generate for refusal detection (default: 30)
 - `storage`: Optuna SQLite storage URL for resume support (default: sqlite:///heretic_study.db)
 - `study_name`: Optuna study name for resuming experiments
+
+**Phase 1-7 Advanced Settings (enabled by default):**
+- `use_neural_refusal_detection`: Zero-shot NLI detection (default: true)
+- `ensemble_probe_pca`: Combine probe + PCA directions (default: true)
+- `use_activation_calibration`: Adaptive weight scaling (default: true)
+- `use_warm_start_params`: Model family warm-start (default: true)
+- `enable_validation`: Validation framework (default: true)
+
+**Phase 1-7 Advanced Settings (disabled by default):**
+- `use_concept_cones`: Category-specific directions
+- `use_caa`: Contrastive Activation Addition
+- `use_circuit_ablation`: Attention head targeting (⚠️ No GQA support)
 
 ## Performance Optimizations
 
@@ -365,6 +424,29 @@ import json; p='models/MODEL/tokenizer_config.json'; c=json.load(open(p,encoding
 **Solution:** Use `--cache-weights false` flag:
 ```bash
 heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --cache-weights false
+```
+
+### Circuit Ablation Not Working
+**Problem:** Circuit-level ablation fails or returns 0 circuits ablated.
+
+**Cause:** GQA (Grouped Query Attention) models are not compatible with circuit ablation.
+
+**Affected models:** Llama 3.x, Qwen2.5, and other GQA models.
+
+**Solution:** Use standard layer-level ablation instead:
+```bash
+# Disable circuit ablation for GQA models
+heretic --model meta-llama/Llama-3.1-8B-Instruct --use-circuit-ablation false
+```
+
+### Ensemble Probe Failing
+**Problem:** RuntimeError about class imbalance or low accuracy.
+
+**Cause:** Supervised probing requires balanced data (≥10 samples per class) and reasonable accuracy.
+
+**Solution:** Check your bad_prompts dataset triggers actual refusals, or use PCA-only mode:
+```bash
+heretic --model MODEL --ensemble-probe-pca false --use-pca-extraction true
 ```
 
 ### pip install --force-reinstall Breaks Environment
