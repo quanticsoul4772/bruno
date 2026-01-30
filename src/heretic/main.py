@@ -33,7 +33,7 @@ from rich.traceback import install
 
 from .config import Settings
 from .evaluator import Evaluator
-from .model import AbliterationParameters, Model
+from .model import AbliterationParameters, LayerRangeProfile, Model
 from .utils import (
     BatchSizeError,
     empty_cache,
@@ -284,6 +284,25 @@ def run():
     del good_residuals, bad_residuals
     empty_cache()
 
+    # Convert layer profile configs to LayerRangeProfile objects
+    layer_profiles: list[LayerRangeProfile] | None = None
+    if settings.enable_layer_profiles and settings.layer_range_profiles:
+        layer_profiles = [
+            LayerRangeProfile(
+                range_start=p.range_start,
+                range_end=p.range_end,
+                weight_multiplier=p.weight_multiplier,
+            )
+            for p in settings.layer_range_profiles
+        ]
+        print()
+        print("Layer-range profiles enabled:")
+        for p in layer_profiles:
+            print(
+                f"  * Layers {p.range_start:.0%}-{p.range_end:.0%}: "
+                f"weight multiplier = {p.weight_multiplier:.2f}"
+            )
+
     trial_index = 0
     start_time = time.perf_counter()
     oom_count = 0
@@ -388,6 +407,7 @@ def run():
                 kl_check_prompts=evaluator.good_prompts
                 if settings.kl_divergence_tokens == 1
                 else None,
+                layer_profiles=layer_profiles,
             )
             print(f"  * Completed {rounds_done} iteration rounds")
         elif use_multi_direction and refusal_directions_multi is not None:
@@ -397,10 +417,13 @@ def run():
                 refusal_directions_multi,
                 direction_weights,
                 parameters,
+                layer_profiles,
             )
         else:
             # Original single-direction ablation
-            model.abliterate(refusal_directions, direction_index, parameters)
+            model.abliterate(
+                refusal_directions, direction_index, parameters, layer_profiles
+            )
 
         print("* Evaluating...")
         try:
@@ -549,18 +572,21 @@ def run():
                     max_rounds=settings.iterative_rounds,
                     min_direction_magnitude=settings.min_direction_magnitude,
                     max_kl_per_round=settings.max_kl_per_round,
+                    layer_profiles=layer_profiles,
                 )
             elif use_multi_direction and refusal_directions_multi is not None:
                 model.abliterate_multi_direction(
                     refusal_directions_multi,
                     direction_weights,
                     parameters,
+                    layer_profiles,
                 )
             else:
                 model.abliterate(
                     refusal_directions,
                     best_trial.user_attrs["direction_index"],
                     parameters,
+                    layer_profiles,
                 )
             validator.measure_post_abliteration()
             validator.print_summary()
@@ -630,6 +656,7 @@ def run():
                 refusal_directions,
                 trial.user_attrs["direction_index"],
                 parameters,
+                layer_profiles,
             )
 
         # Determine save path
@@ -747,6 +774,7 @@ def run():
                 refusal_directions,
                 trial.user_attrs["direction_index"],
                 parameters,
+                layer_profiles,
             )
 
         while True:

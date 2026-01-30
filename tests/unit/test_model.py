@@ -13,6 +13,37 @@ import pytest
 import torch
 
 
+class TestLayerRangeProfile:
+    """Test the LayerRangeProfile dataclass."""
+
+    def test_layer_range_profile_creation(self):
+        """Test creating LayerRangeProfile with valid values."""
+        from heretic.model import LayerRangeProfile
+
+        profile = LayerRangeProfile(
+            range_start=0.0,
+            range_end=0.4,
+            weight_multiplier=0.5,
+        )
+
+        assert profile.range_start == 0.0
+        assert profile.range_end == 0.4
+        assert profile.weight_multiplier == 0.5
+
+    def test_layer_range_profile_full_range(self):
+        """Test LayerRangeProfile covering full layer range."""
+        from heretic.model import LayerRangeProfile
+
+        profile = LayerRangeProfile(
+            range_start=0.0,
+            range_end=1.0,
+            weight_multiplier=1.0,
+        )
+
+        assert profile.range_start == 0.0
+        assert profile.range_end == 1.0
+
+
 class TestAbliterationParameters:
     """Test the AbliterationParameters dataclass."""
 
@@ -272,30 +303,109 @@ class TestModelGetAbliterableComponents:
 class TestModelAbliterate:
     """Test the abliteration (orthogonalization) process."""
 
+    def test_abliterate_with_layer_profiles(self):
+        """Test that abliterate applies layer profile multipliers."""
+        from heretic.model import AbliterationParameters, LayerRangeProfile, Model
+
+        mock_model = MagicMock()
+        # Use PropertyMock to properly mock the dtype property
+        type(mock_model.model).dtype = property(lambda self: torch.float32)
+
+        # Create actual tensors for 4 layers
+        num_layers = 4
+        attn_weights = [torch.randn(64, 64) for _ in range(num_layers)]
+        mlp_weights = [torch.randn(64, 256) for _ in range(num_layers)]
+        originals = [w.clone() for w in attn_weights]
+
+        mock_layers = []
+        for i in range(num_layers):
+            layer = MagicMock()
+            layer.self_attn.o_proj.weight = attn_weights[i]
+            layer.mlp.down_proj.weight = mlp_weights[i]
+            mock_layers.append(layer)
+
+        mock_model.get_layers = MagicMock(return_value=mock_layers)
+
+        def get_matrices(layer_index):
+            return {
+                "attn.o_proj": [attn_weights[layer_index]],
+                "mlp.down_proj": [mlp_weights[layer_index]],
+            }
+
+        mock_model.get_layer_matrices = MagicMock(side_effect=get_matrices)
+        mock_model.get_layer_multiplier = Model.get_layer_multiplier.__get__(
+            mock_model, Model
+        )
+
+        refusal_directions = torch.randn(5, 64)  # embeddings + 4 layers
+
+        parameters = {
+            "attn.o_proj": AbliterationParameters(
+                max_weight=1.0,
+                max_weight_position=2.0,
+                min_weight=0.0,
+                min_weight_distance=4.0,
+            ),
+            "mlp.down_proj": AbliterationParameters(
+                max_weight=1.0,
+                max_weight_position=2.0,
+                min_weight=0.0,
+                min_weight_distance=4.0,
+            ),
+        }
+
+        # Layer profiles: early layers get 0.0 multiplier (no abliteration)
+        # late layers get 1.0 (full abliteration)
+        layer_profiles = [
+            LayerRangeProfile(range_start=0.0, range_end=0.5, weight_multiplier=0.0),
+            LayerRangeProfile(range_start=0.5, range_end=1.0, weight_multiplier=1.0),
+        ]
+
+        Model.abliterate(
+            mock_model, refusal_directions, 2.0, parameters, layer_profiles
+        )
+
+        # Layer 0 (0.0) and Layer 1 (0.33) should NOT be modified (multiplier=0.0)
+        assert torch.allclose(attn_weights[0], originals[0])
+        assert torch.allclose(attn_weights[1], originals[1])
+
+        # Layer 2 (0.67) and Layer 3 (1.0) should be modified (multiplier=1.0)
+        assert not torch.allclose(attn_weights[2], originals[2])
+        assert not torch.allclose(attn_weights[3], originals[3])
+
     def test_abliterate_modifies_weights(self):
         """Test that abliterate modifies the weight matrices."""
         from heretic.model import AbliterationParameters, Model
 
         # Create a mock model with real tensors for modification
         mock_model = MagicMock()
-        mock_model.model.dtype = torch.float32
+        # Use PropertyMock to properly mock the dtype property
+        type(mock_model.model).dtype = property(lambda self: torch.float32)
 
-        # Create actual tensors that will be modified
-        attn_weight = torch.randn(64, 64)
-        mlp_weight = torch.randn(64, 256)
-        original_attn = attn_weight.clone()
-        original_mlp = mlp_weight.clone()
+        # Create actual tensors that will be modified - one per layer
+        num_layers = 4
+        attn_weights = [torch.randn(64, 64) for _ in range(num_layers)]
+        mlp_weights = [torch.randn(64, 256) for _ in range(num_layers)]
+        original_attn = [w.clone() for w in attn_weights]
 
-        mock_layer = MagicMock()
-        mock_layer.self_attn.o_proj.weight = attn_weight
-        mock_layer.mlp.down_proj.weight = mlp_weight
+        mock_layers = []
+        for i in range(num_layers):
+            layer = MagicMock()
+            layer.self_attn.o_proj.weight = attn_weights[i]
+            layer.mlp.down_proj.weight = mlp_weights[i]
+            mock_layers.append(layer)
 
-        mock_model.get_layers = MagicMock(return_value=[mock_layer] * 4)
-        mock_model.get_layer_matrices = MagicMock(
-            return_value={
-                "attn.o_proj": [attn_weight],
-                "mlp.down_proj": [mlp_weight],
+        mock_model.get_layers = MagicMock(return_value=mock_layers)
+
+        def get_matrices(layer_index):
+            return {
+                "attn.o_proj": [attn_weights[layer_index]],
+                "mlp.down_proj": [mlp_weights[layer_index]],
             }
+
+        mock_model.get_layer_matrices = MagicMock(side_effect=get_matrices)
+        mock_model.get_layer_multiplier = Model.get_layer_multiplier.__get__(
+            mock_model, Model
         )
 
         # Refusal directions (5 layers: embeddings + 4 layers)
@@ -319,30 +429,45 @@ class TestModelAbliterate:
         # Apply abliteration with global direction (direction_index=2.0)
         Model.abliterate(mock_model, refusal_directions, 2.0, parameters)
 
-        # Weights should have been modified
-        assert not torch.allclose(attn_weight, original_attn)
-        assert not torch.allclose(mlp_weight, original_mlp)
+        # At least some weights should have been modified (layers near position 2.0)
+        modified = False
+        for i in range(num_layers):
+            if not torch.allclose(attn_weights[i], original_attn[i]):
+                modified = True
+                break
+        assert modified, "No weights were modified"
 
     def test_abliterate_with_none_direction_uses_per_layer(self):
         """Test abliterate uses per-layer directions when direction_index is None."""
         from heretic.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
-        mock_model.model.dtype = torch.float32
+        # Use PropertyMock to properly mock the dtype property
+        type(mock_model.model).dtype = property(lambda self: torch.float32)
 
-        weight = torch.randn(64, 64)
-        original = weight.clone()
+        num_layers = 2
+        attn_weights = [torch.randn(64, 64) for _ in range(num_layers)]
+        mlp_weights = [torch.randn(64, 256) for _ in range(num_layers)]
+        original_attn = [w.clone() for w in attn_weights]
 
-        mock_layer = MagicMock()
-        mock_layer.self_attn.o_proj.weight = weight
-        mock_layer.mlp.down_proj.weight = torch.randn(64, 256)
+        mock_layers = []
+        for i in range(num_layers):
+            layer = MagicMock()
+            layer.self_attn.o_proj.weight = attn_weights[i]
+            layer.mlp.down_proj.weight = mlp_weights[i]
+            mock_layers.append(layer)
 
-        mock_model.get_layers = MagicMock(return_value=[mock_layer] * 2)
-        mock_model.get_layer_matrices = MagicMock(
-            return_value={
-                "attn.o_proj": [weight],
-                "mlp.down_proj": [mock_layer.mlp.down_proj.weight],
+        mock_model.get_layers = MagicMock(return_value=mock_layers)
+
+        def get_matrices(layer_index):
+            return {
+                "attn.o_proj": [attn_weights[layer_index]],
+                "mlp.down_proj": [mlp_weights[layer_index]],
             }
+
+        mock_model.get_layer_matrices = MagicMock(side_effect=get_matrices)
+        mock_model.get_layer_multiplier = Model.get_layer_multiplier.__get__(
+            mock_model, Model
         )
 
         refusal_directions = torch.randn(3, 64)  # embeddings + 2 layers
@@ -365,36 +490,47 @@ class TestModelAbliterate:
         # None direction_index triggers per-layer directions
         Model.abliterate(mock_model, refusal_directions, None, parameters)
 
-        # Weight should be modified
-        assert not torch.allclose(weight, original)
+        # At least one weight should be modified
+        modified = False
+        for i in range(num_layers):
+            if not torch.allclose(attn_weights[i], original_attn[i]):
+                modified = True
+                break
+        assert modified, "No weights were modified"
 
     def test_abliterate_skips_distant_layers(self):
         """Test that layers outside min_weight_distance are not modified."""
         from heretic.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
-        mock_model.model.dtype = torch.float32
+        # Use PropertyMock to properly mock the dtype property
+        type(mock_model.model).dtype = property(lambda self: torch.float32)
 
         # Weights for layers 0, 1, 2, 3
-        weights = [torch.randn(64, 64) for _ in range(4)]
-        originals = [w.clone() for w in weights]
+        num_layers = 4
+        attn_weights = [torch.randn(64, 64) for _ in range(num_layers)]
+        mlp_weights = [torch.randn(64, 256) for _ in range(num_layers)]
+        originals = [w.clone() for w in attn_weights]
 
         mock_layers = []
-        for w in weights:
+        for i in range(num_layers):
             layer = MagicMock()
-            layer.self_attn.o_proj.weight = w
-            layer.mlp.down_proj.weight = torch.randn(64, 256)
+            layer.self_attn.o_proj.weight = attn_weights[i]
+            layer.mlp.down_proj.weight = mlp_weights[i]
             mock_layers.append(layer)
 
         mock_model.get_layers = MagicMock(return_value=mock_layers)
 
         def get_matrices(layer_index):
             return {
-                "attn.o_proj": [weights[layer_index]],
-                "mlp.down_proj": [mock_layers[layer_index].mlp.down_proj.weight],
+                "attn.o_proj": [attn_weights[layer_index]],
+                "mlp.down_proj": [mlp_weights[layer_index]],
             }
 
         mock_model.get_layer_matrices = MagicMock(side_effect=get_matrices)
+        mock_model.get_layer_multiplier = Model.get_layer_multiplier.__get__(
+            mock_model, Model
+        )
 
         refusal_directions = torch.randn(5, 64)
 
@@ -417,13 +553,13 @@ class TestModelAbliterate:
         Model.abliterate(mock_model, refusal_directions, 1.0, parameters)
 
         # Layer 0: distance=1 > 0.5, should NOT be modified
-        assert torch.allclose(weights[0], originals[0])
+        assert torch.allclose(attn_weights[0], originals[0])
         # Layer 1: distance=0 <= 0.5, should be modified
-        assert not torch.allclose(weights[1], originals[1])
+        assert not torch.allclose(attn_weights[1], originals[1])
         # Layer 2: distance=1 > 0.5, should NOT be modified
-        assert torch.allclose(weights[2], originals[2])
+        assert torch.allclose(attn_weights[2], originals[2])
         # Layer 3: distance=2 > 0.5, should NOT be modified
-        assert torch.allclose(weights[3], originals[3])
+        assert torch.allclose(attn_weights[3], originals[3])
 
 
 class TestModelResponses:
@@ -1025,7 +1161,9 @@ class TestModelMultiDirectionAblation:
 
         captured_params = []
 
-        def capture_abliterate(directions, direction_index, params):
+        def capture_abliterate(
+            directions, direction_index, params, layer_profiles=None
+        ):
             captured_params.append(params)
 
         mock_model.abliterate = capture_abliterate

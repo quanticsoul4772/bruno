@@ -20,6 +20,24 @@ class DatasetSpecification(BaseModel):
     column: str = Field(description="Column in the dataset that contains the prompts")
 
 
+class LayerRangeProfileConfig(BaseModel):
+    """Configuration for a layer range abliteration profile.
+
+    Defines abliteration strength for a specific layer range. Research shows
+    different layer ranges encode different aspects of refusal behavior.
+    """
+
+    range_start: float = Field(
+        description="Start of layer range as fraction of total layers (0.0-1.0)"
+    )
+    range_end: float = Field(
+        description="End of layer range as fraction of total layers (0.0-1.0)"
+    )
+    weight_multiplier: float = Field(
+        description="Multiplier applied to abliteration weights in this range"
+    )
+
+
 class Settings(BaseSettings):
     model: str = Field(description="Hugging Face model ID, or path to model on disk.")
 
@@ -279,6 +297,30 @@ class Settings(BaseSettings):
     orthogonalize_directions: bool = Field(
         default=True,
         description="Orthogonalize refusal direction against helpfulness direction to preserve capabilities.",
+    )
+
+    # Phase 6: Per-Layer-Range Profiles
+    enable_layer_profiles: bool = Field(
+        default=True,
+        description="Enable per-layer-range abliteration profiles for more surgical targeting. Different layer ranges encode different aspects of refusal.",
+    )
+
+    layer_range_profiles: list[LayerRangeProfileConfig] = Field(
+        default=[
+            # Early layers (embeddings/basic representations) - light touch preserves capabilities
+            LayerRangeProfileConfig(
+                range_start=0.0, range_end=0.4, weight_multiplier=0.5
+            ),
+            # Middle layers (semantic "what to refuse") - primary abliteration target
+            LayerRangeProfileConfig(
+                range_start=0.4, range_end=0.7, weight_multiplier=1.0
+            ),
+            # Late layers (behavioral "how to refuse") - moderate abliteration
+            LayerRangeProfileConfig(
+                range_start=0.7, range_end=1.0, weight_multiplier=0.8
+            ),
+        ],
+        description="Per-layer-range abliteration profiles. Each profile defines a layer range (as fractions 0.0-1.0) and a weight multiplier. Research shows: early layers encode basic representations, middle layers encode semantic refusal decisions, late layers encode behavioral refusal patterns.",
     )
 
     helpfulness_prompts: DatasetSpecification = Field(

@@ -34,6 +34,26 @@ class AbliterationParameters:
 
 
 @dataclass
+class LayerRangeProfile:
+    """Defines abliteration strength for a specific layer range.
+
+    Research shows different layer ranges encode different aspects of refusal:
+    - Early layers (0.0-0.4): Basic representations, light abliteration preserves capabilities
+    - Middle layers (0.4-0.7): Semantic "what to refuse", primary abliteration target
+    - Late layers (0.7-1.0): Behavioral "how to refuse", moderate abliteration
+
+    Attributes:
+        range_start: Start of the layer range as fraction of total layers (0.0-1.0)
+        range_end: End of the layer range as fraction of total layers (0.0-1.0)
+        weight_multiplier: Multiplier applied to abliteration weights in this range
+    """
+
+    range_start: float  # 0.0-1.0 (fraction of total layers)
+    range_end: float  # 0.0-1.0 (fraction of total layers)
+    weight_multiplier: float  # Applied to computed abliteration weight
+
+
+@dataclass
 class PCAExtractionResult:
     """Result from PCA-based refusal direction extraction.
 
@@ -231,11 +251,47 @@ class Model:
     def get_abliterable_components(self) -> list[str]:
         return list(self.get_layer_matrices(0).keys())
 
+    def get_layer_multiplier(
+        self,
+        layer_index: int,
+        num_layers: int,
+        layer_profiles: list["LayerRangeProfile"] | None = None,
+    ) -> float:
+        """Get the weight multiplier for a specific layer based on layer range profiles.
+
+        Args:
+            layer_index: The index of the current layer
+            num_layers: Total number of layers in the model
+            layer_profiles: List of LayerRangeProfile defining multipliers per range
+
+        Returns:
+            Weight multiplier for this layer (default 1.0 if no profile matches)
+        """
+        if layer_profiles is None or len(layer_profiles) == 0:
+            return 1.0
+
+        # Convert layer index to relative position (0.0 to 1.0)
+        relative_position = layer_index / max(num_layers - 1, 1)
+
+        # Find matching profile (first match wins)
+        for profile in layer_profiles:
+            if profile.range_start <= relative_position < profile.range_end:
+                return profile.weight_multiplier
+
+        # Handle edge case where relative_position == 1.0 (last layer)
+        if relative_position >= 1.0:
+            for profile in layer_profiles:
+                if profile.range_end >= 1.0:
+                    return profile.weight_multiplier
+
+        return 1.0  # Default if no profile matches
+
     def abliterate(
         self,
         refusal_directions: Tensor,
         direction_index: float | None,
         parameters: dict[str, AbliterationParameters],
+        layer_profiles: list["LayerRangeProfile"] | None = None,
     ):
         if direction_index is None:
             refusal_direction = None
@@ -306,6 +362,12 @@ class Model:
                 weight = params.max_weight + (distance / params.min_weight_distance) * (
                     params.min_weight - params.max_weight
                 )
+
+                # Apply layer-range multiplier for surgical targeting
+                layer_multiplier = self.get_layer_multiplier(
+                    layer_index, num_layers, layer_profiles
+                )
+                weight = weight * layer_multiplier
 
                 for matrix in matrices:
                     # Reuse cached projector per device to prevent memory accumulation
@@ -591,6 +653,7 @@ class Model:
         max_kl_per_round: float = 0.5,
         base_logprobs: Tensor | None = None,
         kl_check_prompts: list[str] | None = None,
+        layer_profiles: list["LayerRangeProfile"] | None = None,
     ) -> tuple[int, list[float]]:
         """Iteratively extract and ablate refusal directions.
 
@@ -636,7 +699,7 @@ class Model:
             refusal_directions = F.normalize(raw_difference, p=2, dim=1)
 
             # Ablate this round's directions (per-layer mode)
-            self.abliterate(refusal_directions, None, parameters)
+            self.abliterate(refusal_directions, None, parameters, layer_profiles)
 
             # Capability guard - measure KL after each round
             if (
@@ -671,6 +734,7 @@ class Model:
         refusal_directions: Tensor,
         direction_weights: list[float],
         parameters: dict[str, "AbliterationParameters"],
+        layer_profiles: list["LayerRangeProfile"] | None = None,
     ):
         """Abliterate multiple refusal directions with configurable weights.
 
@@ -704,7 +768,7 @@ class Model:
                 )
 
             # Apply abliteration with scaled weights (per-layer mode)
-            self.abliterate(single_direction, None, scaled_parameters)
+            self.abliterate(single_direction, None, scaled_parameters, layer_profiles)
 
     def stream_chat_response(self, chat: list[dict[str, str]]) -> str:
         chat_prompt: str = self.tokenizer.apply_chat_template(
