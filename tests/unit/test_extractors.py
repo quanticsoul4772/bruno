@@ -3,8 +3,9 @@
 
 """Unit tests for direction extractor plugin system."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestExtractorRegistry:
@@ -20,7 +21,7 @@ class TestExtractorRegistry:
 
     def test_get_extractor_returns_class(self):
         """Test get_extractor returns the extractor class."""
-        from heretic.extractors import get_extractor, RefusalDirectionExtractor
+        from heretic.extractors import RefusalDirectionExtractor, get_extractor
 
         extractor_cls = get_extractor("refusal")
 
@@ -36,9 +37,9 @@ class TestExtractorRegistry:
     def test_register_extractor(self):
         """Test registering a custom extractor."""
         from heretic.extractors import (
-            register_extractor,
-            get_extractor,
             DirectionExtractor,
+            get_extractor,
+            register_extractor,
         )
 
         class CustomExtractor(DirectionExtractor):
@@ -82,8 +83,9 @@ class TestDirectionExtractor:
 
     def test_extract_directions_default_impl(self):
         """Test default extract_directions implementation."""
-        from heretic.extractors import DirectionExtractor
         import torch
+
+        from heretic.extractors import DirectionExtractor
 
         class TestExtractor(DirectionExtractor):
             def get_prompts(self, settings):

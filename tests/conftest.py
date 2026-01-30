@@ -7,9 +7,9 @@ IMPORTANT: This file must be at tests/conftest.py for auto-discovery.
 DO NOT place in tests/fixtures/ subdirectory.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 import torch
 
 

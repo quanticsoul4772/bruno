@@ -16,7 +16,6 @@ import json
 import sys
 from pathlib import Path
 
-
 # Files to checksum (weight files and critical config)
 CHECKSUM_PATTERNS = [
     "*.safetensors",

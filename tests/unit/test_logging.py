@@ -40,8 +40,9 @@ class TestGetLogger:
     def test_get_logger_returns_logger(self):
         """Test get_logger returns a logger instance."""
         with patch.dict(os.environ, {"HERETIC_STRUCTURED_LOGGING": "false"}):
-            from heretic.logging import get_logger
             import logging
+
+            from heretic.logging import get_logger
 
             logger = get_logger("test.module")
 

@@ -7,9 +7,9 @@ These tests use extensive mocking to avoid loading real models.
 The Model class wraps HuggingFace models and provides abliteration functionality.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 import torch
 
 
@@ -274,7 +274,7 @@ class TestModelAbliterate:
 
     def test_abliterate_modifies_weights(self):
         """Test that abliterate modifies the weight matrices."""
-        from heretic.model import Model, AbliterationParameters
+        from heretic.model import AbliterationParameters, Model
 
         # Create a mock model with real tensors for modification
         mock_model = MagicMock()
@@ -325,7 +325,7 @@ class TestModelAbliterate:
 
     def test_abliterate_with_none_direction_uses_per_layer(self):
         """Test abliterate uses per-layer directions when direction_index is None."""
-        from heretic.model import Model, AbliterationParameters
+        from heretic.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         mock_model.model.dtype = torch.float32
@@ -370,7 +370,7 @@ class TestModelAbliterate:
 
     def test_abliterate_skips_distant_layers(self):
         """Test that layers outside min_weight_distance are not modified."""
-        from heretic.model import Model, AbliterationParameters
+        from heretic.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         mock_model.model.dtype = torch.float32
@@ -512,8 +512,9 @@ class TestModelLogprobs:
 
     def test_get_logprobs_returns_log_softmax(self):
         """Test get_logprobs applies log_softmax to logits."""
-        from heretic.model import Model
         import torch.nn.functional as F
+
+        from heretic.model import Model
 
         mock_model = MagicMock()
 

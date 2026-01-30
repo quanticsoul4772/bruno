@@ -3,8 +3,9 @@
 
 """Unit tests for OOM recovery utilities."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestBatchSizeError:

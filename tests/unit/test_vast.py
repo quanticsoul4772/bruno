@@ -8,9 +8,10 @@ to avoid making real API calls or requiring the vastai CLI.
 """
 
 import json
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestAPIKeyValidation:
@@ -42,42 +43,42 @@ class TestAPIKeyValidation:
 
     def test_validate_api_key_rejects_semicolon(self):
         """Test semicolon injection is blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key; rm -rf /")
 
     def test_validate_api_key_rejects_backticks(self):
         """Test backtick injection is blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key`whoami`")
 
     def test_validate_api_key_rejects_dollar_sign(self):
         """Test dollar sign variable expansion is blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key$HOME")
 
     def test_validate_api_key_rejects_pipe(self):
         """Test pipe command chaining is blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key|cat /etc/passwd")
 
     def test_validate_api_key_rejects_ampersand(self):
         """Test ampersand background execution is blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key&whoami")
 
     def test_validate_api_key_rejects_quotes(self):
         """Test quotes are blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key'injection")
@@ -87,14 +88,14 @@ class TestAPIKeyValidation:
 
     def test_validate_api_key_rejects_newlines(self):
         """Test newline injection is blocked."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key\nwhoami")
 
     def test_validate_api_key_rejects_spaces(self):
         """Test spaces are blocked (could break command parsing)."""
-        from heretic.vast import validate_api_key, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key with spaces")
@@ -191,7 +192,7 @@ PLACEHOLDER_VAR=your_api_key_here
 
     def test_vast_config_from_env_rejects_malicious_api_key(self):
         """Test VastConfig.from_env rejects API key with shell metacharacters."""
-        from heretic.vast import VastConfig, APIKeyValidationError
+        from heretic.vast import APIKeyValidationError, VastConfig
 
         with patch.dict("os.environ", {"VAST_API_KEY": "key; rm -rf /"}, clear=True):
             with patch("pathlib.Path.exists", return_value=False):
@@ -319,7 +320,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_success(self):
         """Test successful CLI command execution."""
-        from heretic.vast import run_vastai_cmd, VastConfig
+        from heretic.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="test-key")
 
@@ -339,7 +340,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_with_api_key(self):
         """Test API key is passed via environment."""
-        from heretic.vast import run_vastai_cmd, VastConfig
+        from heretic.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="secret-key")
 
@@ -355,7 +356,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_missing_api_key(self):
         """Test error when API key is missing."""
-        from heretic.vast import run_vastai_cmd, VastConfig
+        from heretic.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="")
 
@@ -367,7 +368,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_cli_not_found(self):
         """Test error when CLI executable not found."""
-        from heretic.vast import run_vastai_cmd, VastConfig
+        from heretic.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="test-key")
 
@@ -380,8 +381,9 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_timeout(self):
         """Test timeout handling."""
-        from heretic.vast import run_vastai_cmd, VastConfig
         import subprocess
+
+        from heretic.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="test-key")
 
@@ -400,7 +402,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_ssh_url_format(self):
         """Test parsing ssh://user@host:port format."""
-        from heretic.vast import get_ssh_info, VastConfig
+        from heretic.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -413,7 +415,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_ssh_p_format_ip(self):
         """Test parsing 'ssh -p PORT user@IP' format."""
-        from heretic.vast import get_ssh_info, VastConfig
+        from heretic.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -426,7 +428,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_ssh_p_format_hostname(self):
         """Test parsing 'ssh -p PORT user@hostname' format."""
-        from heretic.vast import get_ssh_info, VastConfig
+        from heretic.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -439,7 +441,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_user_host_port_format(self):
         """Test parsing user@host:port format (without ssh://)."""
-        from heretic.vast import get_ssh_info, VastConfig
+        from heretic.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -452,7 +454,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_command_failure(self):
         """Test handling of failed ssh-url command."""
-        from heretic.vast import get_ssh_info, VastConfig
+        from heretic.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -465,7 +467,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_unparseable_output(self):
         """Test handling of unparseable SSH URL output."""
-        from heretic.vast import get_ssh_info, VastConfig
+        from heretic.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -482,7 +484,7 @@ class TestGetInstances:
 
     def test_get_instances_success(self):
         """Test successful instance listing."""
-        from heretic.vast import get_instances, VastConfig
+        from heretic.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -504,7 +506,7 @@ class TestGetInstances:
 
     def test_get_instances_empty(self):
         """Test empty instance list."""
-        from heretic.vast import get_instances, VastConfig
+        from heretic.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -517,7 +519,7 @@ class TestGetInstances:
 
     def test_get_instances_api_error(self):
         """Test handling of API errors."""
-        from heretic.vast import get_instances, VastConfig
+        from heretic.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -530,7 +532,7 @@ class TestGetInstances:
 
     def test_get_instances_invalid_json(self):
         """Test handling of invalid JSON response."""
-        from heretic.vast import get_instances, VastConfig
+        from heretic.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -547,7 +549,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_finds_running(self):
         """Test finding first running instance."""
-        from heretic.vast import get_running_instance, VastConfig
+        from heretic.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -565,7 +567,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_with_status_field(self):
         """Test finding instance using 'status' field instead of 'actual_status'."""
-        from heretic.vast import get_running_instance, VastConfig
+        from heretic.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -580,7 +582,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_none_running(self):
         """Test returning first instance when none running."""
-        from heretic.vast import get_running_instance, VastConfig
+        from heretic.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -597,7 +599,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_empty_list(self):
         """Test handling empty instance list."""
-        from heretic.vast import get_running_instance, VastConfig
+        from heretic.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -652,7 +654,7 @@ class TestGetConnection:
 
     def test_get_connection_no_ssh_info(self):
         """Test handling when SSH info cannot be retrieved."""
-        from heretic.vast import get_connection, VastConfig
+        from heretic.vast import VastConfig, get_connection
 
         config = VastConfig(api_key="test-key")
 
@@ -665,7 +667,7 @@ class TestGetConnection:
 
     def test_get_connection_success(self):
         """Test successful connection creation."""
-        from heretic.vast import get_connection, VastConfig
+        from heretic.vast import VastConfig, get_connection
 
         config = VastConfig(api_key="test-key")
 
