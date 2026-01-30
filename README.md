@@ -99,19 +99,19 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 - Cloud CLI for Vast.ai GPU management
 - Experiments framework for testing new behavioral directions
 
-### Advanced Abliteration (Phases 1-7)
+### Advanced Abliteration
 
 Heretic includes state-of-the-art abliteration improvements:
 
-| Phase | Feature | Default | Description |
-|-------|---------|---------|-------------|
-| 1 | **Neural Refusal Detection** | ✅ ON | Zero-shot NLI catches soft refusals and evasive responses |
-| 2 | **Supervised Probing + Ensemble** | ✅ ON | Linear probes combined with PCA for better direction extraction |
-| 3 | **Activation Calibration** | ✅ ON | Adaptive weight scaling based on refusal activation strength |
-| 4 | **Concept Cones** | OFF | Category-specific directions (violence, fraud, self-harm, etc.) |
-| 5 | **CAA** | OFF | Contrastive Activation Addition - add compliance direction |
-| 6 | **Circuit-Level Ablation** | OFF | Target specific attention heads (⚠️ Not for GQA models) |
-| 7 | **Warm-Start Transfer** | ✅ ON | Model family profiles for 2x faster Optuna convergence |
+| Feature | Default | Description |
+|---------|---------|-------------|
+| **Neural Refusal Detection** | ✅ ON | Zero-shot NLI catches soft refusals and evasive responses |
+| **Supervised Probing + Ensemble** | ✅ ON | Linear probes combined with PCA for better direction extraction |
+| **Activation Calibration** | ✅ ON | Adaptive weight scaling based on refusal activation strength |
+| **Concept Cones** | OFF | Category-specific directions (violence, fraud, self-harm, etc.) |
+| **Contrastive Activation Addition** | OFF | Add compliance direction alongside refusal removal |
+| **Circuit-Level Ablation** | OFF | Target specific attention heads (⚠️ Not for GQA models) |
+| **Warm-Start Transfer** | ✅ ON | Model family profiles for 2x faster Optuna convergence |
 
 ### Performance Optimizations
 
@@ -240,16 +240,16 @@ study_name = "heretic_study"
 refusal_check_tokens = 30  # Fewer tokens = faster evaluation
 
 # Advanced features (all enabled by default)
-use_neural_refusal_detection = true   # Phase 1: Zero-shot NLI
-ensemble_probe_pca = true             # Phase 2: Probe + PCA ensemble
-use_activation_calibration = true     # Phase 3: Adaptive weight scaling
-use_warm_start_params = true          # Phase 7: Model family warm-start
+use_neural_refusal_detection = true   # Zero-shot NLI detection
+ensemble_probe_pca = true             # Probe + PCA ensemble
+use_activation_calibration = true     # Adaptive weight scaling
+use_warm_start_params = true          # Model family warm-start
 enable_validation = true              # Validation framework
 
 # Optional advanced features (disabled by default)
-use_concept_cones = false             # Phase 4: Category clustering
-use_caa = false                       # Phase 5: Compliance direction addition
-use_circuit_ablation = false          # Phase 6: Attention head targeting
+use_concept_cones = false             # Category clustering
+use_caa = false                       # Compliance direction addition
+use_circuit_ablation = false          # Attention head targeting
 ```
 
 ### Model Compatibility Notes
@@ -278,7 +278,7 @@ Heretic uses **activation direction analysis** to find and remove behavioral ten
 
 ```
 1. FIND direction    → Compare activations on contrastive prompts (PCA + supervised probing)
-2. CALIBRATE         → Scale weights based on activation strength (Phase 3)
+2. CALIBRATE         → Scale weights based on activation strength
 3. PROJECT it out    → Orthogonalize weight matrices against that direction
 4. OPTIMIZE          → Find intensity that modifies behavior without destroying capability
 5. VALIDATE          → Measure improvement with neural refusal detection
@@ -288,13 +288,13 @@ This technique is general - it works for any behavior encoded as a direction in 
 
 ### Advanced Features
 
-**Neural Refusal Detection (Phase 1):** Uses zero-shot NLI to catch soft refusals, evasive responses, and novel refusal patterns that string matching misses.
+**Neural Refusal Detection:** Uses zero-shot NLI to catch soft refusals, evasive responses, and novel refusal patterns that string matching misses.
 
-**Ensemble Direction Extraction (Phase 2):** Combines supervised linear probes with contrastive PCA for more accurate refusal direction identification.
+**Ensemble Direction Extraction:** Combines supervised linear probes with contrastive PCA for more accurate refusal direction identification.
 
-**Activation Calibration (Phase 3):** Measures how strongly prompts activate the refusal direction and scales ablation weights accordingly - stronger activations get stronger ablation.
+**Activation Calibration:** Measures how strongly prompts activate the refusal direction and scales ablation weights accordingly - stronger activations get stronger ablation.
 
-**Warm-Start Transfer (Phase 7):** Uses pre-computed hyperparameter profiles for model families (Llama, Qwen, Mistral, Gemma, Phi) to initialize Optuna, achieving ~2x faster convergence.
+**Warm-Start Transfer:** Uses pre-computed hyperparameter profiles for model families (Llama, Qwen, Mistral, Gemma, Phi) to initialize Optuna, achieving ~2x faster convergence.
 
 ## Web Search Feature
 
