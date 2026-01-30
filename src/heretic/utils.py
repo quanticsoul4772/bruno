@@ -2,7 +2,6 @@
 # Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
 import gc
-from dataclasses import asdict
 from importlib.metadata import version
 from pathlib import Path
 from typing import TypeVar
