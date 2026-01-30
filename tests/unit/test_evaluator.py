@@ -315,6 +315,7 @@ class TestEvasivePatternDetection:
             refusal_detection_mode="strict",
             detect_soft_refusals=False,
             detect_evasive_responses=False,
+            use_neural_refusal_detection=False,  # Disable neural detection for this test
             evasive_patterns=[
                 r"let's talk about .* instead",
             ],
