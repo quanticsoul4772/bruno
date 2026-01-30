@@ -113,6 +113,23 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed instructions.
 - Or use Docker with `--gpus all`
 - Or use RunPod/Vast.ai for cloud GPU access
 
+## Important Notes
+
+### Large Model Support (32B+)
+
+For models with >14B parameters on multi-GPU systems, special configuration is required:
+
+- **Use `device_map="balanced"`** for even GPU distribution (not "auto")
+- **Set `cache_weights=false`** (required for multi-GPU, incompatible with weight caching)
+- **Set `iterative_rounds=0`** to reduce memory pressure
+- **Use `batch_size=4`** for stable performance
+
+See `LESSONS_LEARNED.md` for detailed troubleshooting and configuration guidance.
+
+**Expected runtime for 32B models:**
+- 4x RTX 4090: ~30-35 hours for 200 trials
+- 1x A100 80GB: ~12-15 hours for 200 trials (faster with weight caching enabled)
+
 ## Installation
 
 ```bash

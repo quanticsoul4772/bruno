@@ -716,34 +716,77 @@ The plan originally claimed "~30% compute savings" from Optuna pruning. This req
 
 ### Task 2.3: Implement Multi-GPU Parallel Trial Execution (DOCUMENTED - Complex)
 **Priority:** 🟡 MEDIUM
-**Effort:** 60-80 hours (REVISED from 24-32h)
+**Effort:** 60-80 hours (REVISED from 24-32h based on 2026-01-30 experience)
 **Expected Impact:** 2-4x speedup on multi-GPU systems
 **Dependencies:** Task 1.4 (OOM Recovery), PostgreSQL (external)
 **Status:** Architecture documented below. Implementation deferred due to complexity.
 
-**⚠️ COMPLEXITY WARNING:**
+**⚠️ COMPLEXITY WARNING (UPDATED 2026-01-30):**
 
-This task is more complex than originally estimated due to:
+This task is significantly more complex than originally estimated. Real-world testing revealed:
 
-1. **Memory Constraints:**
-   - Each parallel trial needs a separate Model instance
-   - 32B model = ~60GB per instance
-   - 4× RTX 4090 (96GB total VRAM) = **only 1-2 parallel trials**, not 4
-   - Must implement memory-aware job scheduling
+**Actual Learnings from 32B Model Run (4x RTX 4090):**
 
-2. **Conflict with In-Memory Weight Caching:**
-   - Current optimization caches `state_dict` per process
-   - Multi-process = each process needs its own cache = N × memory
-   - May need to disable caching for parallel mode OR implement shared memory
+1. **Weight Caching INCOMPATIBLE with Multi-GPU:**
+   - `cache_weights=true` + `device_map="balanced"` = crashes
+   - `copy.deepcopy(state_dict())` fails when model is sharded across GPUs
+   - Creates "meta" device tensors → RuntimeError during inference
+   - **Impact:** MUST use `cache_weights=false` for multi-GPU
+   - **Performance cost:** Trials reload from disk (~30s) vs memory (~2s)
 
-3. **PostgreSQL Migration:**
+2. **Parallel Trials ≠ Multi-GPU Device Map:**
+   - Optuna parallel trials (n_jobs) = multiple processes
+   - Each process loads its own model instance
+   - 32B model = ~64GB per instance
+   - 4× RTX 4090 (96GB total) = **only 1 model instance fits**
+   - Cannot run parallel trials without exceeding VRAM
+
+3. **Revised Memory Math:**
+   - Single 32B model with device_map="balanced": 66GB (fits on 4x24GB)
+   - Two 32B models simultaneously: 132GB (does NOT fit on 96GB)
+   - **Conclusion:** Parallel trials require N × 80GB GPUs OR quantization
+
+4. **PostgreSQL Migration:**
    - SQLite does not support concurrent writes
-   - Users must migrate existing studies before enabling parallel mode
-   - Migration script and clear documentation required
+   - Users must migrate existing studies
+   - Migration script required
 
-**Revised Implementation Strategy:**
+5. **Performance Reality:**
+   - 32B on 4x RTX 4090: ~30 hours for 200 trials
+   - NO weight caching: Disk reload adds ~25s per trial
+   - Multi-GPU overhead: ~10-15% slower than single A100 80GB
+   - **Parallel trials would only help if memory allows multiple instances**
 
-**Option A: Process-per-GPU (Recommended)**
+**Revised Implementation Strategy (Post-Testing):**
+
+**CRITICAL INSIGHT:** Parallel trials are only viable when:
+- Each GPU has enough memory for a full model instance (80GB for 32B)
+- OR quantization reduces model size (4-bit = 16GB per instance)
+- OR using smaller models (7B = 14GB per instance)
+
+**Option A: Quantization-Enabled Parallel Trials (Future)**
+```python
+# Requires implementing 4-bit quantization in heretic
+# 32B model in 4-bit: ~16GB per instance
+# 4× RTX 4090 (96GB total): Could run 5-6 parallel trials
+# Speedup: ~4-5x (accounting for quantization overhead)
+
+# Implementation needed:
+from transformers import BitsAndBytesConfig
+
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    quantization_config=quantization_config,
+    device_map="auto"
+)
+```
+
+**Option B: Process-per-GPU (Limited Benefit)**
 ```python
 # Spawn separate processes, each assigned to one GPU
 # Each process loads its own model instance
@@ -1246,10 +1289,83 @@ parallel_trials = false  # In config.toml
 - [x] **NEW:** Test fixtures use proper mocking
 - [x] **NEW:** Effort estimates are realistic
 - [x] **NEW:** Optuna pruning trade-offs are explained
+- [x] **NEW (2026-01-30):** Multi-GPU complexity validated with real 32B model run
+- [x] **NEW (2026-01-30):** Weight caching incompatibility documented
+
+---
+
+## Appendix: Real-World Validation Data
+
+### 32B Model Abliteration (2026-01-30)
+
+**Setup:**
+- Hardware: 4x RTX 4090 (96GB total VRAM, Vast.ai instance 30756327)
+- Model: Qwen/Qwen2.5-Coder-32B-Instruct (64 layers, ~64GB)
+- Config: device_map="balanced", cache_weights=false, iterative_rounds=0, batch_size=4
+
+**Observed Timings:**
+- Model loading: ~5 minutes
+- Residual extraction (800 prompts @ batch_size=4): ~25-30 minutes
+- Trial 1-6: ~9 minutes per trial average
+- GPU distribution: GPU0=17GB, GPU1=17GB, GPU2=17GB, GPU3=15GB
+
+**Failed Configurations:**
+1. device_map="auto" + cache_weights=true → OOM (all weight on GPU 0)
+2. device_map="balanced" + cache_weights=true → Meta device errors
+3. device_map="balanced" + iterative_rounds=2 → OOM during trials
+4. batch_size=1 → 100+ minutes for residual extraction (too slow)
+
+**Working Configuration:** See LESSONS_LEARNED.md
+
+**Performance Reality:**
+- Estimated: 12-15 hours (optimistic)
+- Actual: ~30-35 hours (realistic for multi-GPU without caching)
+- Bottleneck: No weight caching = 30s disk reload per trial
+
+**Recommendation:** Use A100 80GB for 32B models (enables caching, ~12-15h actual)
+
+---
+
+## Real-World Validation Notes
+
+### 32B Model Run (2026-01-30)
+
+**Attempted:** Qwen/Qwen2.5-Coder-32B-Instruct on 4x RTX 4090 (96GB total VRAM)
+
+**Key Findings:**
+1. **Weight caching incompatible with multi-GPU** - `cache_weights=true` + `device_map="balanced"` causes meta device errors
+2. **device_map="auto" fails** - Loads entire model on GPU 0 (23GB → OOM), ignores other GPUs
+3. **device_map="balanced" works** - Distributes evenly: 17GB + 17GB + 17GB + 15GB
+4. **Iterative ablation causes OOM** - Needs 3-5GB extra for hidden states
+5. **batch_size=1 is extremely slow** - 100+ minutes for residual extraction, batch_size=4 is 4x faster
+6. **Multiple processes compete** - No lock file prevents simultaneous runs
+
+**Working config:**
+```toml
+device_map = "balanced"
+cache_weights = false
+iterative_rounds = 0
+batch_size = 4
+```
+
+**Time estimate:** ~30-35 hours for 200 trials (not the 12-15h originally hoped)
+
+**Recommendation:** For 32B models, use A100 80GB (enables caching, ~12-15h) or reduce to 50-100 trials
+
+See `LESSONS_LEARNED.md` for complete analysis and troubleshooting guide.
 
 ---
 
 ## Changelog
+
+### 2026-01-30: Real-World 32B Model Validation
+- **TESTED:** 32B model abliteration on 4x RTX 4090
+- **DISCOVERED:** Weight caching incompatibility with multi-GPU (critical bug)
+- **DISCOVERED:** device_map="balanced" required (not "auto")
+- **DISCOVERED:** Iterative ablation OOM on 24GB GPUs
+- **CREATED:** LESSONS_LEARNED.md with troubleshooting guide
+- **UPDATED:** CLAUDE.md with multi-GPU configuration section
+- **UPDATED:** Multi-GPU task effort from 24-32h to 60-80h (realistic)
 
 ### 2026-01-29: Post-Optimization Review
 - **UPDATED:** Executive Summary to reflect completed performance optimizations

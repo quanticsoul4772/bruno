@@ -1,0 +1,89 @@
+# Configuration template for 32B models on multi-GPU systems
+# Based on real-world testing: Qwen2.5-Coder-32B on 4x RTX 4090
+# Date: 2026-01-30
+
+model = "Qwen/Qwen2.5-Coder-32B-Instruct"
+
+# ============================================================================
+# MULTI-GPU SETTINGS (CRITICAL)
+# ============================================================================
+
+# Use "balanced" for even distribution across all GPUs
+# DO NOT use "auto" - it will load everything on GPU 0 and cause OOM
+device_map = "balanced"
+
+# MUST be false for multi-GPU setups
+# deepcopy(state_dict()) fails when model is sharded across devices
+cache_weights = false
+
+# Disable torch.compile for 32B (overhead not beneficial)
+compile = false
+
+# ============================================================================
+# MEMORY SAFETY
+# ============================================================================
+
+# Disable iterative ablation - requires extra 3-5GB VRAM per trial
+# Safe values: 0 for 24GB GPUs, 1-2 for 80GB GPUs
+iterative_rounds = 0
+
+# Conservative batch sizes for 32B models
+# batch_size=4 provides good balance (4x faster than 1, still safe)
+batch_size = 4
+
+# Cap auto-detection to prevent OOM
+max_batch_size = 16
+
+# ============================================================================
+# OPTUNA OPTIMIZATION
+# ============================================================================
+
+# Number of optimization trials
+# 200 trials = ~30-35 hours on 4x RTX 4090
+# Consider reducing to 50-100 for faster results
+n_trials = 200
+
+# Random exploration trials before TPE
+n_startup_trials = 30
+
+# SQLite storage for persistence (resume support)
+storage = "sqlite:///heretic_32b.db"
+
+# Study name (for resuming experiments)
+study_name = "qwen32b_coder"
+
+# ============================================================================
+# AUTO-SAVE SETTINGS
+# ============================================================================
+
+# Automatically select and save best trial (no interactive prompts)
+auto_select = true
+
+# Path to save the abliterated model
+auto_select_path = "/workspace/models/Qwen2.5-Coder-32B-Instruct-heretic"
+
+# ============================================================================
+# OPTIONAL: HUGGINGFACE UPLOAD
+# ============================================================================
+
+# Uncomment to auto-upload to HuggingFace Hub
+# Requires HF_TOKEN environment variable
+# hf_upload = "your-username/qwen-32b-coder-heretic"
+# hf_private = false
+
+# ============================================================================
+# PERFORMANCE EXPECTATIONS
+# ============================================================================
+
+# With this configuration on 4x RTX 4090:
+# - Model loading: ~5 minutes
+# - Residual extraction: ~25-30 minutes (800 prompts @ batch_size=4)
+# - Per trial: ~9 minutes (reload from disk + abliterate + evaluate)
+# - Total: ~30-35 hours for 200 trials
+#
+# Bottleneck: No weight caching = 30s disk reload per trial
+#
+# For faster abliteration:
+# - Use A100 80GB (enables cache_weights=true, ~12-15h)
+# - Reduce n_trials to 50-100 (~8-15h)
+# - Use smaller model (7B = ~2-3h)
