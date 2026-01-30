@@ -8,7 +8,7 @@ Usage:
     # Compare original vs modified model
     python eval_verbosity.py --original meta-llama/Llama-3.1-8B-Instruct \
                              --modified ./Llama-3.1-8B-Instruct-concise
-    
+
     # Just measure a single model
     python eval_verbosity.py --model meta-llama/Llama-3.1-8B-Instruct
 """
@@ -17,13 +17,12 @@ import argparse
 import json
 import statistics
 import sys
-from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from rich.console import Console
-from rich.table import Table
 from rich.progress import track
+from rich.table import Table
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 console = Console()
 

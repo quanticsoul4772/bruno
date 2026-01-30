@@ -173,12 +173,12 @@ def main():
     abl_words = [r["words"] for r in results["abliterated"]]
     orig_words = [r["words"] for r in results["original"]]
 
-    print(f"\nAbliterated Model (Verbosity Spike):")
+    print("\nAbliterated Model (Verbosity Spike):")
     print(f"  Total words: {sum(abl_words)}")
     print(f"  Average: {sum(abl_words) / len(abl_words):.1f} words/response")
     print(f"  Min: {min(abl_words)}, Max: {max(abl_words)}")
 
-    print(f"\nOriginal Model:")
+    print("\nOriginal Model:")
     print(f"  Total words: {sum(orig_words)}")
     print(f"  Average: {sum(orig_words) / len(orig_words):.1f} words/response")
     print(f"  Min: {min(orig_words)}, Max: {max(orig_words)}")

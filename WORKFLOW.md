@@ -269,7 +269,7 @@ The `heretic-vast watch` command shows a live dashboard:
 
 The `--storage sqlite:////workspace/heretic_study.db --study-name qwen32b-abliteration` flags enable resume:
 
-- SQLite database persists on `/workspace` 
+- SQLite database persists on `/workspace`
 - If training stops, restart instance and run same command
 - Optuna automatically detects existing study and continues
 

@@ -199,7 +199,7 @@ Heretic uses **activation direction analysis** to find and remove behavioral ten
 
 ```
 1. FIND direction    → Compare activations on contrastive prompts
-2. PROJECT it out    → Orthogonalize weight matrices against that direction  
+2. PROJECT it out    → Orthogonalize weight matrices against that direction
 3. OPTIMIZE          → Find intensity that modifies behavior without destroying capability
 ```
 
@@ -344,13 +344,13 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 ```bibtex
 @misc{arditi2024refusallanguagemodelsmediated,
-      title={Refusal in Language Models Is Mediated by a Single Direction}, 
+      title={Refusal in Language Models Is Mediated by a Single Direction},
       author={Andy Arditi and Oscar Obeso and Aaquib Syed and Daniel Paleka and Nina Rimsky and Wes Gurnee and Neel Nanda},
       year={2024},
       eprint={2406.11717},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2406.11717}, 
+      url={https://arxiv.org/abs/2406.11717},
 }
 ```
 

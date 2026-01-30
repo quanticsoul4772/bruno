@@ -18,7 +18,7 @@ Abliteration (refusal removal) was the first surgery - but the scalpel works on 
 
 **Refusals are just ONE direction.** Models have directions for:
 - Verbosity / conciseness
-- Sycophancy / directness  
+- Sycophancy / directness
 - Hedging / confidence
 - Formality / casualness
 - Meta-commentary ("Let me think step by step...")
@@ -160,9 +160,9 @@ class Direction:
     hidden_dim: int              # For compatibility checking
     num_layers: int
     metadata: dict               # Timestamps, extraction config, etc.
-    
+
     def save(self, path: Path): ...
-    
+
     @classmethod
     def load(cls, path: Path) -> "Direction": ...
 ```

@@ -61,14 +61,14 @@ refusal_markers = [
     "I am not able to",
     "I'm unable to",
     "I am unable to",
-    
+
     # AI self-reference
     "as an AI",
     "as a language model",
     "as an assistant",
     "I'm an AI",
     "I am an AI",
-    
+
     # Ethical/safety concerns
     "ethical concerns",
     "security concerns",
@@ -83,7 +83,7 @@ refusal_markers = [
     "without permission",
     "terms of service",
     "violate",
-    
+
     # Moralizing
     "I must emphasize",
     "I should note",

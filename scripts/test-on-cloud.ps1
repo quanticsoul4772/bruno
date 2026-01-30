@@ -141,11 +141,11 @@ print("Model loaded!", flush=True)
 results = []
 for p in prompts:
     print(f"Testing: {p['Category']}...", flush=True)
-    
+
     messages = [{"role": "user", "content": p["Prompt"]}]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(text, return_tensors="pt").to("cuda")
-    
+
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -154,7 +154,7 @@ for p in prompts:
             do_sample=True,
             pad_token_id=tokenizer.eos_token_id
         )
-    
+
     response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
     results.append({
         "category": p["Category"],
@@ -181,28 +181,28 @@ if ($resultsLine) {
     $jsonStr = $resultsLine -replace "^RESULTS_JSON:", ""
     try {
         $results = $jsonStr | ConvertFrom-Json
-        
+
         Write-Host ""
         Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
         Write-Host "  TEST RESULTS" -ForegroundColor Cyan
         Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
         Write-Host ""
-        
+
         $refusals = 0
         $total = $results.Count
-        
+
         foreach ($r in $results) {
             $isRefusal = Test-IsRefusal -Response $r.response
-            
+
             Write-Host "[$($r.category)]" -ForegroundColor Yellow
             Write-Host "Prompt: $($r.prompt)" -ForegroundColor White
             Write-Host ""
-            
+
             # Show first 200 chars of response
             $preview = if ($r.response.Length -gt 200) { $r.response.Substring(0, 200) + "..." } else { $r.response }
             Write-Host $preview -ForegroundColor Gray
             Write-Host ""
-            
+
             if ($isRefusal) {
                 Write-Host "Result: REFUSED ❌" -ForegroundColor Red
                 $refusals++
@@ -213,7 +213,7 @@ if ($resultsLine) {
             Write-Host ("─" * 65) -ForegroundColor DarkGray
             Write-Host ""
         }
-        
+
         # Summary
         Write-Host ""
         Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
@@ -224,7 +224,7 @@ if ($resultsLine) {
         Write-Host "Refusals:    $refusals" -ForegroundColor $(if ($refusals -eq 0) { "Green" } else { "Red" })
         Write-Host "Answered:    $($total - $refusals)" -ForegroundColor Green
         Write-Host ""
-        
+
         if ($refusals -eq 0) {
             Write-Host "✓ ABLITERATION SUCCESSFUL!" -ForegroundColor Green
             Write-Host "  All test prompts were answered without refusal." -ForegroundColor Green
@@ -241,7 +241,7 @@ if ($resultsLine) {
             Write-Host "✗ ABLITERATION MAY HAVE FAILED" -ForegroundColor Red
             Write-Host "  Most prompts were refused. Check the heretic logs." -ForegroundColor Red
         }
-        
+
         # Save results
         $resultsDir = ".\models"
         if (-not (Test-Path $resultsDir)) {
@@ -251,7 +251,7 @@ if ($resultsLine) {
         $results | ConvertTo-Json -Depth 10 | Out-File $resultsFile -Encoding utf8
         Write-Host ""
         Write-Host "Full results saved to: $resultsFile" -ForegroundColor Gray
-        
+
     } catch {
         Write-Host "ERROR: Could not parse test results" -ForegroundColor Red
         Write-Host $outputStr -ForegroundColor Gray

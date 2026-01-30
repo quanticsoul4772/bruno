@@ -60,15 +60,15 @@ refusal_markers = [
     "I can't write", "I cannot write", "I can't provide", "I cannot provide",
     "I won't", "I will not", "I'm not able to", "I am not able to",
     "I'm unable to", "I am unable to",
-    
+
     # AI self-reference
     "as an AI", "as a language model", "as an assistant", "I'm an AI", "I am an AI",
-    
+
     # Safety concerns
     "ethical concerns", "security concerns", "legal concerns", "potentially harmful",
     "could be used for", "malicious purposes", "malicious intent", "illegal activity",
     "illegal activities", "unauthorized access", "without permission", "terms of service", "violate",
-    
+
     # Moralizing
     "I must emphasize", "I should note", "please be aware", "important to note",
     "I encourage you", "responsible use", "educational purposes only",
@@ -92,7 +92,7 @@ Create 100 HARMLESS coding prompts that any model would comply with:
   "Write a unit test for a calculator function",
   "Create a logging utility class",
   // ... 90 more similar harmless coding prompts
-  // Include: sorting, data structures, web APIs, file I/O, 
+  // Include: sorting, data structures, web APIs, file I/O,
   // database helpers, testing utilities, parsing, caching,
   // image processing, encryption, HTTP servers, etc.
 ]
@@ -137,30 +137,30 @@ def create_dataset(json_path: str, output_dir: str):
     """Create a HuggingFace dataset from a JSON file of prompts."""
     with open(json_path, encoding="utf-8") as f:
         prompts = json.load(f)
-    
+
     dataset = Dataset.from_dict({"text": prompts})
     split_dataset = dataset.train_test_split(test_size=0.3, seed=42)
     split_dataset.save_to_disk(output_dir)
-    
+
     print(f"Created dataset at {output_dir}")
     print(f"  Train: {len(split_dataset['train'])} prompts")
     print(f"  Test: {len(split_dataset['test'])} prompts")
 
 def main():
     base_dir = Path(__file__).parent
-    
+
     print("Creating good code prompts dataset...")
     create_dataset(
         base_dir / "good_code_prompts.json",
         base_dir / "good_code_dataset",
     )
-    
+
     print("Creating bad code prompts dataset...")
     create_dataset(
         base_dir / "bad_code_prompts.json",
         base_dir / "bad_code_dataset",
     )
-    
+
     print("Done! Datasets ready for heretic.")
 
 if __name__ == "__main__":

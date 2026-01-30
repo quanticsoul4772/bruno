@@ -139,12 +139,12 @@ import torch
 @pytest.fixture
 def mock_settings():
     """Mock Settings object with common defaults.
-    
+
     Note: Must patch load_prompts before creating Evaluator,
     as Evaluator.__init__ calls load_prompts immediately.
     """
     from heretic.config import Settings
-    
+
     # Create real Settings object with minimal config
     # This avoids issues with Mock not having proper Pydantic behavior
     settings = Settings(
@@ -176,27 +176,27 @@ def mock_tokenizer():
 @pytest.fixture
 def mock_model(mock_tokenizer):
     """Mock Model object for testing.
-    
+
     This mocks the heretic Model class, not the HuggingFace model.
     """
     model = MagicMock()
     model.tokenizer = mock_tokenizer
     model.device = torch.device("cpu")
-    
+
     # Mock layer structure (32 layers typical)
     mock_layers = [MagicMock() for _ in range(32)]
     model.get_layers.return_value = mock_layers
-    
+
     # Mock inference methods
     model.get_responses_batched.return_value = [
         "Sure, I can help with that!",
         "Here's how to do it...",
         "I'm sorry, I can't help with that.",  # Refusal
     ]
-    
+
     # Mock logprobs (batch_size x vocab_size)
     model.get_logprobs_batched.return_value = torch.randn(3, 32000)
-    
+
     return model
 
 
@@ -224,58 +224,58 @@ import torch
 
 class TestRefusalDetection:
     """Test refusal marker detection (no model needed)."""
-    
+
     @pytest.fixture
     def evaluator_with_mocked_init(self, mock_settings, mock_model):
         """Create Evaluator with mocked initialization.
-        
+
         Patches load_prompts and model methods to avoid real inference.
         """
         with patch('heretic.evaluator.load_prompts') as mock_load:
             # Return minimal prompt lists
             mock_load.return_value = ["test prompt"]
-            
+
             # Patch the base_logprobs computation
             with patch.object(mock_model, 'get_logprobs_batched') as mock_logprobs:
                 mock_logprobs.return_value = torch.randn(1, 32000)
-                
+
                 # Patch count_refusals to avoid inference during init
                 with patch('heretic.evaluator.Evaluator.count_refusals') as mock_count:
                     mock_count.return_value = 1
-                    
+
                     from heretic.evaluator import Evaluator
                     evaluator = Evaluator(mock_settings, mock_model)
-                    
+
         return evaluator
-    
+
     def test_refusal_detection_basic(self, evaluator_with_mocked_init):
         """Test basic refusal marker detection."""
         evaluator = evaluator_with_mocked_init
-        
+
         assert evaluator.is_refusal("I'm sorry, I can't help with that")
         assert evaluator.is_refusal("I cannot assist with harmful requests")
         assert not evaluator.is_refusal("Sure, I can help with that")
         assert not evaluator.is_refusal("Here's how to do it")
-    
+
     def test_refusal_detection_case_insensitive(self, evaluator_with_mocked_init):
         """Test refusal detection is case-insensitive."""
         evaluator = evaluator_with_mocked_init
-        
+
         assert evaluator.is_refusal("I'M SORRY")
         assert evaluator.is_refusal("i'm sorry")
         assert evaluator.is_refusal("I'm SoRrY")
-    
+
     def test_refusal_detection_with_emphasis(self, evaluator_with_mocked_init):
         """Test refusal detection strips markdown emphasis."""
         evaluator = evaluator_with_mocked_init
-        
+
         # Should handle "I *cannot* help" -> "I cannot help"
         assert evaluator.is_refusal("I *cannot* help with that")
-    
+
     def test_regex_is_precompiled(self, evaluator_with_mocked_init):
         """Verify regex pattern is pre-compiled for performance."""
         evaluator = evaluator_with_mocked_init
-        
+
         # Pattern should be compiled (has 'pattern' attribute)
         assert hasattr(evaluator.refusal_pattern, 'pattern')
         assert evaluator.refusal_pattern.pattern is not None
@@ -285,11 +285,11 @@ class TestRefusalDetection:
 @pytest.mark.integration
 class TestEvaluatorIntegration:
     """Integration tests with real (tiny) model.
-    
+
     These tests load gpt2 (small, ~500MB) for real inference.
     Marked slow so they don't run in CI by default.
     """
-    
+
     def test_refusal_detection_real_model(self):
         """Integration test with real model."""
         pytest.skip("Requires gpt2 download - run with -m slow")
@@ -307,9 +307,9 @@ from pydantic import ValidationError
 def test_settings_defaults():
     """Test default settings values."""
     from heretic.config import Settings
-    
+
     settings = Settings(model="test-model")
-    
+
     assert settings.model == "test-model"
     assert settings.n_trials == 200
     assert settings.batch_size == 0  # Auto-detect
@@ -319,7 +319,7 @@ def test_settings_defaults():
 def test_settings_validation_requires_model():
     """Test Pydantic validation catches missing model."""
     from heretic.config import Settings
-    
+
     with pytest.raises(ValidationError):
         Settings()  # Missing required 'model' field
 
@@ -327,13 +327,13 @@ def test_settings_validation_requires_model():
 def test_settings_new_performance_options():
     """Test new performance optimization settings."""
     from heretic.config import Settings
-    
+
     settings = Settings(
         model="test",
         compile=True,
         refusal_check_tokens=30,
     )
-    
+
     assert settings.compile is True
     assert settings.refusal_check_tokens == 30
 
@@ -341,13 +341,13 @@ def test_settings_new_performance_options():
 def test_settings_storage_and_study_name():
     """Test Optuna persistence settings."""
     from heretic.config import Settings
-    
+
     settings = Settings(
         model="test",
         storage="sqlite:///test_study.db",
         study_name="my_study",
     )
-    
+
     assert settings.storage == "sqlite:///test_study.db"
     assert settings.study_name == "my_study"
 ```
@@ -521,7 +521,7 @@ from contextlib import contextmanager
 @contextmanager
 def handle_oom(retry_with_smaller_batch: bool = True):
     """Context manager for OOM-safe GPU operations.
-    
+
     Usage:
         with handle_oom():
             model.get_logprobs_batched(prompts)
@@ -530,11 +530,11 @@ def handle_oom(retry_with_smaller_batch: bool = True):
         yield
     except torch.cuda.OutOfMemoryError as e:
         logger.warning(f"GPU OOM detected: {e}")
-        
+
         # Clear GPU memory
         gc.collect()
         torch.cuda.empty_cache()
-        
+
         if retry_with_smaller_batch:
             raise BatchSizeError(
                 "Out of GPU memory. Try reducing batch_size or max_batch_size."
@@ -553,18 +553,18 @@ class BatchSizeError(Exception):
 
 def get_gpu_memory_info() -> dict:
     """Get current GPU memory usage.
-    
+
     Returns:
         dict with keys: total_gb, used_gb, free_gb, utilization_pct
     """
     if not torch.cuda.is_available():
         return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "utilization_pct": 0}
-    
+
     total = torch.cuda.get_device_properties(0).total_memory
     reserved = torch.cuda.memory_reserved(0)
     allocated = torch.cuda.memory_allocated(0)
     free = total - reserved
-    
+
     return {
         "total_gb": total / 1e9,
         "used_gb": allocated / 1e9,
@@ -589,7 +589,7 @@ except BatchSizeError:
         # Progress is already saved via Optuna storage
         print(f"[yellow]Resume with: heretic {settings.model} --storage {settings.storage}[/]")
         return
-    
+
     # Reduce batch size and retry
     settings.max_batch_size = max(1, settings.max_batch_size // 2)
     print(f"[yellow]Reducing max_batch_size to {settings.max_batch_size}[/]")
@@ -647,7 +647,7 @@ except BatchSizeError:
 The plan originally claimed "~30% compute savings" from Optuna pruning. This requires clarification:
 
 > **Pruning is NOT supported for multi-objective optimization in Optuna.**
-> 
+>
 > To enable pruning, you must switch from multi-objective (Pareto front) to single-objective (weighted score).
 > This sacrifices Pareto front diversity in exchange for faster convergence.
 
@@ -773,10 +773,10 @@ def calculate_max_parallel_trials(model_size_gb: float) -> int:
     """Calculate how many parallel trials fit in available GPU memory."""
     available_memory = get_total_gpu_memory_gb()
     safety_margin = 0.9  # Reserve 10% for overhead
-    
+
     # Account for in-memory weight caching (2x model size)
     memory_per_trial = model_size_gb * 2 if use_weight_caching else model_size_gb
-    
+
     return int((available_memory * safety_margin) / memory_per_trial)
 ```
 
@@ -793,17 +793,17 @@ import sys
 
 def migrate_study(source_url: str, target_url: str, study_name: str):
     print(f"Migrating study '{study_name}' from SQLite to PostgreSQL...")
-    
+
     source_storage = optuna.storages.get_storage(source_url)
     target_storage = optuna.storages.get_storage(target_url)
-    
+
     optuna.copy_study(
         from_study_name=study_name,
         from_storage=source_storage,
         to_storage=target_storage,
         to_study_name=study_name,
     )
-    
+
     print(f"Migration complete!")
 
 if __name__ == "__main__":
@@ -815,7 +815,7 @@ if __name__ == "__main__":
         print("    postgresql://heretic:heretic@localhost/heretic_study \\")
         print("    heretic_study")
         sys.exit(1)
-    
+
     migrate_study(sys.argv[1], sys.argv[2], sys.argv[3])
 ```
 
@@ -874,7 +874,7 @@ def load_or_create_study(storage_url: str, study_name: str):
 def generate_unique_study_name(base_name: str, storage_url: str) -> str:
     """Generate unique study name if base name exists."""
     from datetime import datetime
-    
+
     try:
         optuna.load_study(study_name=base_name, storage=storage_url)
         # Study exists - append timestamp
@@ -893,14 +893,14 @@ def test_resume_after_interruption():
     """Test that abliteration can resume after simulated crash."""
     storage = "sqlite:///test_resume.db"
     study_name = "test_resume"
-    
+
     # Run 5 trials, then "crash"
     # ... run heretic with n_trials=5 ...
-    
+
     # Resume and verify
     # ... run heretic with same storage/study_name ...
     # ... verify trials continue from 6 ...
-    
+
     # Cleanup
     os.remove("test_resume.db")
 ```

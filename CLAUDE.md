@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **BEFORE running ANY destructive command:**
 1. State EXACTLY what the command will do
-2. State that it is IRREVERSIBLE  
+2. State that it is IRREVERSIBLE
 3. Ask "Should I proceed? Type 'yes' to confirm."
 4. WAIT for explicit "yes" - NOT "complete", "finish", "do it"
 
@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - IMMEDIATELY investigate the discrepancy
 - Say: "There's a discrepancy. Let me investigate what you're seeing."
 
-### RULE 4: REPEATED USER CONCERNS = STOP AND INVESTIGATE  
+### RULE 4: REPEATED USER CONCERNS = STOP AND INVESTIGATE
 **If the user raises the same concern more than once:**
 - STOP whatever you're doing
 - Do NOT repeat "it's fine"
@@ -398,7 +398,7 @@ heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --cache-weights false
 
 ### NEVER take destructive actions without asking
 - Don't stop instances
-- Don't terminate instances  
+- Don't terminate instances
 - Don't create new instances
 - **ALWAYS ASK FIRST**
 

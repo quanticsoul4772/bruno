@@ -81,19 +81,19 @@ Write-Host ""
 if (-not $ModelName) {
     Write-Host "Scanning for models on remote..." -ForegroundColor Yellow
     $models = wsl -e bash -c "ssh -o StrictHostKeyChecking=no -p $sshPort $sshUser@$sshHost 'ls -1 /workspace/models/ 2>/dev/null'"
-    
+
     if (-not $models -or $models -match "No such file") {
         Write-Host "ERROR: No models found in /workspace/models/" -ForegroundColor Red
         exit 1
     }
-    
+
     $modelList = $models -split "`n" | Where-Object { $_.Trim() }
-    
+
     if ($modelList.Count -eq 0) {
         Write-Host "ERROR: No models found" -ForegroundColor Red
         exit 1
     }
-    
+
     Write-Host ""
     Write-Host "Available models:" -ForegroundColor Cyan
     $i = 1
@@ -103,7 +103,7 @@ if (-not $ModelName) {
     }
     Write-Host ""
     $selection = Read-Host "Select model number"
-    
+
     if ($selection -match '^\d+$' -and [int]$selection -le $modelList.Count -and [int]$selection -gt 0) {
         $ModelName = $modelList[[int]$selection - 1].Trim()
     } else {

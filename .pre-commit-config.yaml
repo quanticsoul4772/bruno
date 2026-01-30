@@ -1,12 +1,12 @@
 # Pre-commit hooks for heretic development
-# Install with: pip install pre-commit && pre-commit install
+# Install with: uv add --dev pre-commit && uv run pre-commit install
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.14.5
     hooks:
       - id: ruff
-        args: [--fix]
+        args: [--fix, --extend-select, I]  # Include import sorting
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -19,5 +19,12 @@ repos:
         args: ['--maxkb=5000']
       - id: check-merge-conflict
 
-# NOTE: pytest is NOT included here - it's too slow for every commit.
-# Run tests manually or let CI handle them.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest tests/ -x -q --tb=short
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]

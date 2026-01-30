@@ -11,7 +11,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: quanticsoul4772/heretic:latest
-    
+
     # GPU access
     deploy:
       resources:
@@ -20,7 +20,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    
+
     # Environment variables
     environment:
       - HF_HOME=/workspace/.cache/huggingface
@@ -28,17 +28,17 @@ services:
       - HF_HUB_ENABLE_HF_TRANSFER=1
       # Uncomment and set your HuggingFace token:
       # - HF_TOKEN=${HF_TOKEN}
-    
+
     # Persistent volumes for cache and outputs
     volumes:
       - heretic-cache:/workspace/.cache
       - heretic-models:/workspace/models
       - heretic-outputs:/workspace/outputs
-    
+
     # Interactive terminal
     stdin_open: true
     tty: true
-    
+
     # Working directory
     working_dir: /workspace
 

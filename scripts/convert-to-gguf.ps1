@@ -11,11 +11,11 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$ModelPath,
-    
+
     [Parameter(Mandatory=$false)]
     [ValidateSet("F16", "Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "Q4_0", "Q3_K_M", "Q2_K")]
     [string]$Quantization = "Q4_K_M",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$OutputDir = ".\models\gguf"
 )
@@ -86,13 +86,13 @@ if ($Quantization -ne "F16") {
     Write-Host "  Step 2: Quantizing to $Quantization" -ForegroundColor Yellow
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Yellow
     Write-Host ""
-    
+
     # Check for quantize binary or use Python
     $QuantizeBin = Join-Path $ProjectRoot "tools\llama.cpp\build\bin\Release\llama-quantize.exe"
     if (-not (Test-Path $QuantizeBin)) {
         $QuantizeBin = Join-Path $ProjectRoot "tools\llama.cpp\llama-quantize.exe"
     }
-    
+
     if (Test-Path $QuantizeBin) {
         # Use binary quantizer (faster)
         & $QuantizeBin $F16Output $QuantizedOutput $Quantization
@@ -101,30 +101,30 @@ if ($Quantization -ne "F16") {
         Write-Host "Note: Using Ollama for quantization (llama.cpp binary not built)" -ForegroundColor Gray
         Write-Host "For faster quantization, build llama.cpp with: cmake --build tools/llama.cpp/build" -ForegroundColor Gray
         Write-Host ""
-        
+
         # Create a temporary Modelfile for Ollama import
         $TempModelfile = Join-Path $OutputDir "Modelfile.temp"
         @"
 FROM $F16Output
 "@ | Out-File -FilePath $TempModelfile -Encoding utf8
-        
+
         # Import into Ollama (it will handle storage)
         Write-Host "Importing into Ollama..." -ForegroundColor Cyan
         ollama create "$ModelName-temp" -f $TempModelfile
-        
+
         # Export quantized version
         Write-Host "Creating quantized version..." -ForegroundColor Cyan
         ollama cp "$ModelName-temp" "$ModelName-$Quantization"
         ollama rm "$ModelName-temp"
-        
+
         Remove-Item $TempModelfile -Force
-        
+
         Write-Host ""
         Write-Host "✓ Model imported to Ollama as: $ModelName-$Quantization" -ForegroundColor Green
-        
+
         $endTime = Get-Date
         $duration = $endTime - $startTime
-        
+
         Write-Host ""
         Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
         Write-Host "  CONVERSION COMPLETE" -ForegroundColor Green
@@ -140,16 +140,16 @@ FROM $F16Output
         Write-Host ""
         exit 0
     }
-    
+
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Quantization failed" -ForegroundColor Red
         exit 1
     }
-    
+
     $quantSize = (Get-Item $QuantizedOutput).Length / 1GB
     Write-Host ""
     Write-Host "✓ Quantized GGUF created: $QuantizedOutput ($([math]::Round($quantSize, 2)) GB)" -ForegroundColor Green
-    
+
     # Clean up F16 file to save space
     Write-Host ""
     $cleanup = Read-Host "Delete F16 file to save space? ($([math]::Round($f16Size, 2)) GB) (y/n)"

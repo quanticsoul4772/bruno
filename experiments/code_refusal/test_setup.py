@@ -8,7 +8,6 @@ Run this before the full abliteration to ensure:
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -71,7 +70,7 @@ def test_config():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    print(f"✓ Config loaded successfully")
+    print("✓ Config loaded successfully")
     print(f"  n_trials: {config.get('n_trials', 'not set')}")
     print(f"  refusal_markers: {len(config.get('refusal_markers', []))} markers")
     print(f"  Sample markers: {config.get('refusal_markers', [])[:3]}")

@@ -55,62 +55,62 @@ This assumes refusal is encoded in a **single direction**. Research shows:
 
 **⚠️ REVIEWER FEEDBACK: The original PCA approach was mathematically incorrect.**
 
-The naive approach (PCA on `bad - good_mean`) captures variance in *types of harmful content*, not multiple refusal directions. 
+The naive approach (PCA on `bad - good_mean`) captures variance in *types of harmful content*, not multiple refusal directions.
 
 **Corrected approach - True Contrastive PCA:**
 ```python
 def get_refusal_directions_contrastive_pca(
-    self, 
-    good_residuals: Tensor, 
-    bad_residuals: Tensor, 
+    self,
+    good_residuals: Tensor,
+    bad_residuals: Tensor,
     n_components: int = 3,
     alpha: float = 1.0,
 ) -> Tensor:
     """Extract refusal directions using TRUE Contrastive PCA.
-    
+
     Finds directions that maximize variance in bad residuals while
     minimizing variance in good residuals. This is done by computing
     eigenvectors of (Σ_bad - α*Σ_good).
-    
+
     Args:
         good_residuals: Shape (n_good, n_layers, hidden_dim)
         bad_residuals: Shape (n_bad, n_layers, hidden_dim)
         n_components: Number of principal components to extract
         alpha: Weight for good covariance subtraction (default 1.0)
-        
+
     Returns:
         Tensor of shape (n_layers, n_components, hidden_dim)
     """
     directions = []
-    
+
     for layer_idx in range(good_residuals.shape[1]):
         good_layer = good_residuals[:, layer_idx, :].cpu().numpy()
         bad_layer = bad_residuals[:, layer_idx, :].cpu().numpy()
-        
+
         # Center the data
         good_centered = good_layer - good_layer.mean(axis=0)
         bad_centered = bad_layer - bad_layer.mean(axis=0)
-        
+
         # Compute covariance matrices
         cov_good = np.cov(good_centered, rowvar=False)
         cov_bad = np.cov(bad_centered, rowvar=False)
-        
+
         # Contrastive covariance: directions that are high-variance in bad,
         # low-variance in good
         cov_contrastive = cov_bad - alpha * cov_good
-        
+
         # Eigendecomposition (eigenvectors with largest eigenvalues)
         eigenvalues, eigenvectors = np.linalg.eigh(cov_contrastive)
-        
+
         # Sort by eigenvalue descending, take top n_components
         idx = np.argsort(eigenvalues)[::-1][:n_components]
         top_directions = eigenvectors[:, idx].T  # Shape: (n_components, hidden_dim)
-        
+
         # Normalize
         layer_directions = torch.from_numpy(top_directions).float()
         layer_directions = F.normalize(layer_directions, p=2, dim=1)
         directions.append(layer_directions)
-    
+
     return torch.stack(directions)
 ```
 
@@ -123,15 +123,15 @@ def get_refusal_directions_paired(
     n_components: int = 3,
 ) -> Tensor:
     """Extract refusal directions from PAIRED prompt differences.
-    
+
     Requires matched pairs: each harmful prompt has a harmless variant.
     PCA on these paired differences finds true refusal-specific directions.
     """
     assert harmless_residuals.shape == harmful_residuals.shape
-    
+
     # Paired differences: (n_pairs, n_layers, hidden_dim)
     differences = harmful_residuals - harmless_residuals
-    
+
     # Now PCA is valid because we're looking at the refusal transformation
     # ... standard PCA implementation ...
 ```
@@ -150,7 +150,7 @@ def abliterate_multi_direction(
         single_direction = refusal_directions[:, component_idx, :]
         # Apply abliteration with scaled weight
         self.abliterate(
-            single_direction, 
+            single_direction,
             direction_index=None,  # Use per-layer
             parameters=parameters,
             weight_scale=weight_multiplier
@@ -282,26 +282,26 @@ def is_refusal(self, response: str) -> bool:
     response = response.replace("*", "")
     # Normalize typographic apostrophes
     response = response.replace("'", "'")
-    
+
     # Check core markers (fast path)
     if self.core_refusal_pattern.search(response):
         return True
-    
+
     # Check soft refusals if enabled
     if self.settings.detect_soft_refusals:
         if self.soft_refusal_pattern.search(response):
             return True
-    
+
     # Check evasive patterns if enabled
     if self.settings.detect_evasive_responses:
         if self.evasive_pattern.search(response):
             return True
-    
+
     # Check safety theater if enabled (off by default)
     if self.settings.detect_safety_theater:
         if self.safety_pattern.search(response):
             return True
-    
+
     return False
 ```
 
@@ -309,7 +309,7 @@ def is_refusal(self, response: str) -> bool:
 ```toml
 # Refusal detection strictness: "strict" | "moderate" | "lenient"
 # strict = core markers only (original behavior)
-# moderate = core + soft refusals (recommended)  
+# moderate = core + soft refusals (recommended)
 # lenient = core + soft + evasive + safety theater
 refusal_detection_mode = "moderate"
 
@@ -365,12 +365,12 @@ def get_logprobs(self, prompts: list[str]) -> Tensor:
 **Multi-token KL divergence:**
 ```python
 def get_multi_token_logprobs(
-    self, 
-    prompts: list[str], 
+    self,
+    prompts: list[str],
     n_tokens: int = 5
 ) -> Tensor:
     """Get log probabilities for first N tokens.
-    
+
     Returns:
         Tensor of shape (n_prompts, n_tokens, vocab_size)
     """
@@ -380,15 +380,15 @@ def get_multi_token_logprobs(
         output_scores=True,
         return_dict_in_generate=True,
     )
-    
+
     # Stack scores for all generated tokens
     # outputs.scores is tuple of (n_prompts, vocab_size) tensors
     logits = torch.stack(outputs.scores, dim=1)  # (n_prompts, n_tokens, vocab_size)
     return F.log_softmax(logits, dim=-1)
 
 def compute_multi_token_kl(
-    self, 
-    base_logprobs: Tensor, 
+    self,
+    base_logprobs: Tensor,
     current_logprobs: Tensor
 ) -> float:
     """Compute average KL divergence over multiple tokens."""
@@ -399,7 +399,7 @@ def compute_multi_token_kl(
         reduction="none",
         log_target=True,
     ).sum(dim=-1)  # Sum over vocab
-    
+
     return kl_per_token.mean().item()  # Mean over tokens and prompts
 ```
 
@@ -407,11 +407,11 @@ def compute_multi_token_kl(
 ```python
 def get_coherence_score(self, prompts: list[str]) -> float:
     """Measure response coherence via perplexity.
-    
+
     Lower perplexity = more coherent/natural responses.
     """
     responses = self.model.get_responses_batched(prompts)
-    
+
     total_perplexity = 0
     for response in responses:
         # Tokenize response
@@ -421,7 +421,7 @@ def get_coherence_score(self, prompts: list[str]) -> float:
             outputs = self.model.model(tokens, labels=tokens)
             perplexity = torch.exp(outputs.loss)
         total_perplexity += perplexity.item()
-    
+
     return total_perplexity / len(responses)
 ```
 
@@ -472,12 +472,12 @@ Round 1:
   - Extract refusal directions from original model
   - Ablate directions
   - Measure remaining refusals
-  
+
 Round 2:
   - Re-extract directions from ABLATED model (not original)
   - Find "residual" refusal directions
   - If direction magnitude > threshold, ablate
-  
+
 Round 3+ (optional):
   - Repeat until directions become negligible
   - Or until diminishing returns
@@ -501,53 +501,53 @@ def abliterate_iterative(
     max_kl_per_round: float = 0.5,  # NEW: capability guard
 ) -> int:
     """Iteratively extract and ablate refusal directions.
-    
+
     CAUTION: This is experimental. Re-extracting from ablated models
     may find artifacts rather than true refusal directions.
-    
+
     Returns:
         Number of rounds performed
     """
     cumulative_kl = 0.0
-    
+
     for round_idx in range(max_rounds):
         print(f"* Iterative ablation round {round_idx + 1}/{max_rounds}...")
-        
+
         # Extract residual directions from current model state
         good_residuals = self.get_residuals_batched(good_prompts)
         bad_residuals = self.get_residuals_batched(bad_prompts)
-        
+
         # Compute raw difference BEFORE normalization for magnitude check
         raw_difference = bad_residuals.mean(dim=0) - good_residuals.mean(dim=0)
-        
+
         # Check magnitude BEFORE normalization (FIX for original bug)
         direction_magnitude = raw_difference.norm(dim=1).mean().item()
         print(f"  * Direction magnitude (pre-norm): {direction_magnitude:.4f}")
-        
+
         if direction_magnitude < min_direction_magnitude:
             print(f"  * Below threshold ({min_direction_magnitude}), stopping iteration")
             break
-        
+
         # Now normalize for abliteration
         refusal_directions = F.normalize(raw_difference, p=2, dim=1)
-        
+
         # Ablate this round's directions
         self.abliterate(refusal_directions, None, parameters)
-        
+
         # NEW: Capability guard - measure KL after each round
         if round_idx < max_rounds - 1:  # Don't check on final round
             round_kl = self._compute_round_kl(good_prompts)  # Quick KL check
             cumulative_kl += round_kl
             print(f"  * Round KL: {round_kl:.3f}, Cumulative: {cumulative_kl:.3f}")
-            
+
             if round_kl > max_kl_per_round:
                 print(f"  * Round KL exceeds limit ({max_kl_per_round}), stopping")
                 break
-        
+
         # Clean up
         del good_residuals, bad_residuals, raw_difference
         empty_cache()
-    
+
     return round_idx + 1
 ```
 
@@ -562,7 +562,7 @@ def abliterate_multi_pass_safe(
     direction_weights: list[float] = [1.0, 0.5, 0.25, 0.1, 0.05],
 ):
     """Extract ALL directions upfront, ablate in single pass.
-    
+
     This avoids the circular logic problem of re-extracting from
     ablated models.
     """
@@ -570,13 +570,13 @@ def abliterate_multi_pass_safe(
     all_directions = self.get_refusal_directions_contrastive_pca(
         good_residuals, bad_residuals, n_components=n_directions
     )
-    
+
     # Ablate each direction with decreasing weight
     for i, weight in enumerate(direction_weights[:n_directions]):
         print(f"  * Ablating direction {i+1}/{n_directions} (weight={weight})")
         direction = all_directions[:, i, :]  # Shape: (n_layers, hidden_dim)
         self.abliterate(
-            direction, 
+            direction,
             direction_index=None,
             parameters=parameters,
             weight_scale=weight,
@@ -643,12 +643,12 @@ def extract_helpfulness_direction(
     unhelpful_prompts: list[str],
 ) -> Tensor:
     """Extract direction that encodes 'helpfulness'.
-    
+
     Uses contrast between helpful and unhelpful/low-quality responses.
     """
     helpful_residuals = self.get_residuals_batched(helpful_prompts)
     unhelpful_residuals = self.get_residuals_batched(unhelpful_prompts)
-    
+
     helpfulness_direction = F.normalize(
         helpful_residuals.mean(dim=0) - unhelpful_residuals.mean(dim=0),
         p=2, dim=1,
@@ -661,24 +661,24 @@ def orthogonalize_direction(
     remove_direction: Tensor,
 ) -> Tensor:
     """Remove component of remove_direction from target_direction.
-    
+
     Args:
         target_direction: Direction to modify (e.g., refusal direction)
         remove_direction: Direction to remove (e.g., helpfulness direction)
-        
+
     Returns:
         Orthogonalized direction
     """
     # For each layer, compute and remove projection
     # target_direction shape: (n_layers, hidden_dim)
     # remove_direction shape: (n_layers, hidden_dim)
-    
+
     # Compute dot product per layer
     dot_product = (target_direction * remove_direction).sum(dim=1, keepdim=True)
-    
+
     # Compute projection
     projection = dot_product * remove_direction
-    
+
     # Remove projection and renormalize
     orthogonal = target_direction - projection
     return F.normalize(orthogonal, p=2, dim=1)
@@ -704,7 +704,7 @@ column = "text"
 # Dataset for contrast - use low-quality/terse responses, NOT educational content
 [unhelpfulness_prompts]
 # Option 1: Random web text (not instruction-tuned)
-dataset = "allenai/c4"  
+dataset = "allenai/c4"
 split = "train[:200]"
 column = "text"
 

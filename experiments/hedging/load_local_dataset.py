@@ -47,7 +47,7 @@ def main():
     confident_ds.save_to_disk(str(confident_save_path))
     hedged_ds.save_to_disk(str(hedged_save_path))
 
-    print(f"\n=== Datasets Saved ===")
+    print("\n=== Datasets Saved ===")
     print(f"Confident: {confident_save_path}")
     print(f"Hedged: {hedged_save_path}")
     print("\nNote: These use load_from_disk() which requires the heretic fix.")

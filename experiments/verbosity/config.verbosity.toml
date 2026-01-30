@@ -1,5 +1,5 @@
 # Verbosity Direction Extraction Experiment
-# 
+#
 # This config extracts a "verbosity direction" by comparing:
 # - good_prompts: Factual/closed questions (naturally get concise answers)
 # - bad_prompts: Open-ended/opinion questions (naturally get verbose answers)

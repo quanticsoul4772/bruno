@@ -191,7 +191,7 @@ def main():
     from collections import Counter
 
     marker_counts = Counter(all_markers)
-    print(f"\nMost common verbose markers:")
+    print("\nMost common verbose markers:")
     for marker, count in marker_counts.most_common(10):
         print(f"  '{marker}': {count} times")
 

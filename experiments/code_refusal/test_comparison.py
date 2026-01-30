@@ -107,6 +107,7 @@ def test_model(
 def main():
     import argparse
     import gc
+
     import torch
 
     parser = argparse.ArgumentParser(

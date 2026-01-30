@@ -1,7 +1,7 @@
 # Verbosity Direction Spike Experiment
 
 > **✅ STATUS: COMPLETE - SPIKE FINISHED**
-> 
+>
 > The verbosity spike experiment has been completed successfully.
 > - **Model**: Qwen/Qwen2.5-7B-Instruct
 > - **Trials**: 50 Optuna optimization trials
@@ -46,7 +46,7 @@ the model's **intrinsic tendency** to elaborate, not instruction following.
 experiments/verbosity/
 ├── README.md                 # This file
 ├── concise_prompts.json      # 200 factual/closed questions
-├── verbose_prompts.json      # 200 open-ended/opinion questions  
+├── verbose_prompts.json      # 200 open-ended/opinion questions
 ├── config.verbosity.toml     # Heretic config for this experiment
 ├── load_local_dataset.py     # Convert JSON to HuggingFace Dataset
 ├── eval_verbosity.py         # Measure response length changes
@@ -113,10 +113,10 @@ heretic-vast watch
 
 ## Actual Results (Spike Complete)
 
-**Run Date**: January 2026  
-**Infrastructure**: Vast.ai 2x A100-SXM4-80GB  
-**Model**: Qwen/Qwen2.5-7B-Instruct  
-**Trials**: 50 Optuna optimization trials  
+**Run Date**: January 2026
+**Infrastructure**: Vast.ai 2x A100-SXM4-80GB
+**Model**: Qwen/Qwen2.5-7B-Instruct
+**Trials**: 50 Optuna optimization trials
 **Output**: `./models/Qwen2.5-7B-Instruct-heretic` (15.2 GB)
 
 ### Optimization Parameters Found
