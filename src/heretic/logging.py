@@ -106,7 +106,9 @@ def setup_logging(
         enable_structured = False
 
     if enable_structured:
-        return _setup_structlog(log_file, log_level, console_output, max_bytes, backup_count)
+        return _setup_structlog(
+            log_file, log_level, console_output, max_bytes, backup_count
+        )
     else:
         return _setup_standard_logging(
             log_level, log_file, console_output, max_bytes, backup_count
@@ -179,7 +181,9 @@ def _setup_standard_logging(
 
     # Log startup info
     logger = logging.getLogger("heretic")
-    logger.debug(f"Logging initialized: level={logging.getLevelName(log_level)}, file={log_file}")
+    logger.debug(
+        f"Logging initialized: level={logging.getLevelName(log_level)}, file={log_file}"
+    )
 
     return logger
 
@@ -288,7 +292,9 @@ def get_logger(name: str = "heretic") -> Any:
         return logging.getLogger(name)
 
 
-def log_error(logger: Any, message: str, error: Exception | None = None, **kwargs: Any) -> None:
+def log_error(
+    logger: Any, message: str, error: Exception | None = None, **kwargs: Any
+) -> None:
     """Log an error with optional exception details and context.
 
     Convenience function for logging errors with consistent formatting.

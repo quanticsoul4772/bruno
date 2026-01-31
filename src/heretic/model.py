@@ -844,7 +844,7 @@ class Model:
                 sum(m.numel() * m.element_size() for m in matrices)
                 for layer_cache in self.layer_weights_cache.values()
                 for matrices in layer_cache.values()
-            ) / (1024 ** 2)
+            ) / (1024**2)
 
             total_params = sum(p.numel() for p in self.model.parameters())
             cached_params = sum(
@@ -852,7 +852,9 @@ class Model:
                 for layer_cache in self.layer_weights_cache.values()
                 for matrices in layer_cache.values()
             )
-            cache_ratio = (cached_params / total_params) * 100 if total_params > 0 else 0
+            cache_ratio = (
+                (cached_params / total_params) * 100 if total_params > 0 else 0
+            )
 
             print(
                 f"  * Cache size: {cache_size_mb:.1f} MB "
@@ -923,8 +925,7 @@ class Model:
                         ) from e
                     else:
                         raise ModelLoadError(
-                            f"Failed to clone weights at layer {layer_idx}. "
-                            f"Error: {e}"
+                            f"Failed to clone weights at layer {layer_idx}. Error: {e}"
                         ) from e
 
             # Validation: Ensure cache is not empty and has expected structure
@@ -985,7 +986,9 @@ class Model:
                     f"model has {num_layers} layers. Cache may be corrupted or from different model."
                 )
 
-            with torch.no_grad():  # Disable gradient tracking for in-place copy operations
+            with (
+                torch.no_grad()
+            ):  # Disable gradient tracking for in-place copy operations
                 for layer_idx in range(num_layers):
                     # Verify layer exists in cache
                     if layer_idx not in self.layer_weights_cache:
@@ -1022,7 +1025,9 @@ class Model:
                             )
 
                         # Restore each matrix from cache
-                        for matrix_idx, (matrix, cached) in enumerate(zip(matrices, cached_matrices)):
+                        for matrix_idx, (matrix, cached) in enumerate(
+                            zip(matrices, cached_matrices)
+                        ):
                             # Verify shapes match
                             if matrix.shape != cached.shape:
                                 raise ModelLoadError(
