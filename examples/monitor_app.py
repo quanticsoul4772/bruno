@@ -339,7 +339,7 @@ CUSTOM_CSS = """
         flex-wrap: wrap;
     }
 }
-"
+"""
 
 
 class StudyMonitor:
@@ -511,7 +511,7 @@ def create_empty_figure(message: str) -> go.Figure:
 
 def get_optimization_history(study: Optional[optuna.Study] = None) -> go.Figure:
     """Generate optimization history plot.
-    
+
     Args:
         study: Optional pre-loaded study to avoid redundant DB calls.
     """
@@ -529,7 +529,8 @@ def get_optimization_history(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # For multi-objective, plot KL divergence (first objective)
         if len(study.directions) > 1:
-            target = lambda t: t.values[0] if t.values else float("inf")
+            def target(t):
+                return t.values[0] if t.values else float("inf")
             fig = plot_optimization_history(
                 study, target=target, target_name="KL Divergence"
             )
@@ -547,7 +548,7 @@ def get_optimization_history(study: Optional[optuna.Study] = None) -> go.Figure:
 
 def get_pareto_front(study: Optional[optuna.Study] = None) -> go.Figure:
     """Generate Pareto front plot for multi-objective optimization.
-    
+
     Args:
         study: Optional pre-loaded study to avoid redundant DB calls.
     """
@@ -582,7 +583,7 @@ def get_pareto_front(study: Optional[optuna.Study] = None) -> go.Figure:
 
 def get_param_importances(study: Optional[optuna.Study] = None) -> go.Figure:
     """Generate parameter importances plot.
-    
+
     Args:
         study: Optional pre-loaded study to avoid redundant DB calls.
     """
@@ -602,11 +603,10 @@ def get_param_importances(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # For multi-objective, plot importance for refusals (usually more interesting)
         if len(study.directions) > 1:
-            target = (
-                lambda t: t.values[1]
-                if t.values and len(t.values) > 1
-                else float("inf")
-            )
+            def target(t):
+                return (t.values[1]
+                            if t.values and len(t.values) > 1
+                            else float("inf"))
             fig = plot_param_importances(study, target=target, target_name="Refusals")
         else:
             fig = plot_param_importances(study)
@@ -622,7 +622,7 @@ def get_param_importances(study: Optional[optuna.Study] = None) -> go.Figure:
 
 def get_parallel_coordinate(study: Optional[optuna.Study] = None) -> go.Figure:
     """Generate parallel coordinate plot.
-    
+
     Args:
         study: Optional pre-loaded study to avoid redundant DB calls.
     """
@@ -640,7 +640,8 @@ def get_parallel_coordinate(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # For multi-objective, plot for KL divergence
         if len(study.directions) > 1:
-            target = lambda t: t.values[0] if t.values else float("inf")
+            def target(t):
+                return t.values[0] if t.values else float("inf")
             fig = plot_parallel_coordinate(
                 study, target=target, target_name="KL Divergence"
             )
@@ -658,7 +659,7 @@ def get_parallel_coordinate(study: Optional[optuna.Study] = None) -> go.Figure:
 
 def get_timeline(study: Optional[optuna.Study] = None) -> go.Figure:
     """Generate trial timeline plot.
-    
+
     Args:
         study: Optional pre-loaded study to avoid redundant DB calls.
     """
@@ -701,7 +702,7 @@ def get_header_html() -> str:
 
 def get_status_html(stats: Optional[dict] = None) -> str:
     """Get status badge HTML.
-    
+
     Args:
         stats: Optional pre-computed stats to avoid redundant calls.
     """
@@ -710,9 +711,12 @@ def get_status_html(stats: Optional[dict] = None) -> str:
         stats = m.get_summary_stats()
     status = stats["status"]
     status_class = stats["status_class"]
-    return f'<span class="{status_class}">{status}</span>'def get_progress_html(stats: Optional[dict] = None) -> str:
+    return f'<span class="{status_class}">{status}</span>'
+
+
+def get_progress_html(stats: Optional[dict] = None) -> str:
     """Get progress bar HTML.
-    
+
     Args:
         stats: Optional pre-computed stats to avoid redundant calls.
     """
@@ -721,7 +725,7 @@ def get_status_html(stats: Optional[dict] = None) -> str:
         stats = m.get_summary_stats()
     completed = stats["completed_trials"]
     progress_pct = stats["progress_pct"]
-    
+
     return f"""
     <div class="progress-container">
         <div class="progress-bar">
@@ -801,9 +805,12 @@ def get_refresh_indicator_html(is_active: bool = True) -> str:
         <span>{status_text}</span>
         <span style="margin-left: auto;">Updated: {stats.get("last_refresh", "N/A")}</span>
     </div>
-    """def get_trials_table(study: Optional[optuna.Study] = None) -> list[list]:
+    """
+
+
+def get_trials_table(study: Optional[optuna.Study] = None) -> list[list]:
     """Get trials as a table for display.
-    
+
     Args:
         study: Optional pre-loaded study to avoid redundant DB calls.
     """
@@ -818,7 +825,7 @@ def get_refresh_indicator_html(is_active: bool = True) -> str:
     rows = []
     for trial in reversed(study.trials[-50:]):  # Last 50 trials, newest first
         state = trial.state.name
-        
+
         # Format values more clearly - don't hardcode /100
         if trial.values and is_multi_objective:
             kl = f"{trial.values[0]:.3f}"
@@ -843,23 +850,20 @@ def get_refresh_indicator_html(is_active: bool = True) -> str:
 
 def refresh_all():
     """Refresh all plots and data.
-    
+
     Loads the study ONCE and passes it to all functions to avoid
     redundant database calls (was loading 5+ times before).
     """
-    m = get_monitor()
-    
-    # Load study once and reuse for all operations
+    m = get_monitor()  # Load study once and reuse for all operations
     study = m.get_study(force_refresh=True)
-    stats = m.get_summary_stats(cached_study=study)
-    
+
     return (
         get_header_html(),
-        get_status_html(stats),
-        get_progress_html(stats),
-        get_metrics_html(stats),
-        get_best_params_html(stats),
-        get_refresh_indicator_html(True, stats),
+        get_status_html(),
+        get_progress_html(),
+        get_metrics_html(),
+        get_best_params_html(),
+        get_refresh_indicator_html(True),
         get_optimization_history(study),
         get_pareto_front(study),
         get_param_importances(study),
@@ -889,13 +893,13 @@ def change_study(study_name: str) -> tuple:
     global monitor, STUDY_NAME
     STUDY_NAME = study_name
     monitor = StudyMonitor(STORAGE_URL, study_name)
-    
+
     # Check if study exists and provide helpful error message
     m = get_monitor()
     study = m.get_study(force_refresh=True)
     if study is None:
         logger.warning(f"Study '{study_name}' not found")
-    
+
     return refresh_all()
 
 
@@ -981,7 +985,7 @@ def create_ui() -> gr.Blocks:
 
             # Main content - Plots
             with gr.Column(scale=3):
-                with gr.Tabs() as tabs:
+                with gr.Tabs():
                     with gr.TabItem("Progress", id="progress"):
                         history_plot = gr.Plot(
                             label="Optimization History",
