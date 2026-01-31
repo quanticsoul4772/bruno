@@ -419,7 +419,7 @@ class Settings(BaseSettings):
             # Humanities & Social Sciences
             "philosophy",
             "econometrics",
-            "world_history",
+            "high_school_world_history",
         ],
         description="MMLU categories to evaluate. Covers mathematical, logical, scientific, professional, and humanities reasoning for comprehensive capability testing.",
     )
