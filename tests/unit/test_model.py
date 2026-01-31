@@ -831,7 +831,7 @@ class TestModelPCAExtraction:
     @pytest.mark.slow
     def test_get_refusal_directions_pca_gpu_performance(self):
         """Test GPU-accelerated PCA performance on realistic dimensions.
-        
+
         Requires 16GB+ VRAM to allocate tensors for 32B model dimensions.
         """
         import time
@@ -841,7 +841,7 @@ class TestModelPCAExtraction:
         # Skip if no CUDA available
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
-        
+
         # Skip if insufficient VRAM (need 16GB+ for 32B model dimensions)
         gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if gpu_memory_gb < 16:

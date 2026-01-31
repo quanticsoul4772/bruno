@@ -424,6 +424,59 @@ def get_connection(instance_id: str, config: VastConfig) -> Optional["Connection
     )
 
 
+def safe_ssh_connect(conn: "Connection", timeout: int = 30) -> bool:
+    """Safely open SSH connection with comprehensive error handling.
+
+    Args:
+        conn: Fabric Connection object (not yet opened)
+        timeout: Connection timeout in seconds (default: 30)
+
+    Returns:
+        True if connection succeeded, False otherwise
+
+    Note:
+        Prints user-friendly error messages for common failure modes.
+        Use this instead of calling conn.open() directly.
+    """
+    try:
+        conn.open()
+        return True
+    except TimeoutError:
+        console.print(f"[red]SSH connection timeout after {timeout}s[/]")
+        console.print("[yellow]Solutions:[/]")
+        console.print("  1. Check instance is running: bruno-vast list")
+        console.print("  2. Verify network connectivity")
+        console.print("  3. Try again with longer timeout")
+        return False
+    except PermissionError:
+        console.print("[red]SSH authentication failed[/]")
+        console.print("[yellow]Solutions:[/]")
+        console.print("  1. Check SSH keys: ls ~/.ssh/")
+        console.print("  2. Verify key loaded: ssh-add -l")
+        console.print("  3. Check Vast.ai instance allows key auth")
+        return False
+    except ConnectionRefusedError:
+        console.print("[red]SSH connection refused[/]")
+        console.print("[yellow]Solutions:[/]")
+        console.print("  1. Verify instance is running (not stopped/destroyed)")
+        console.print("  2. Check firewall isn't blocking SSH")
+        console.print("  3. Verify correct port number")
+        return False
+    except EOFError:
+        console.print("[red]SSH connection closed unexpectedly[/]")
+        console.print("[yellow]Instance may have crashed or been terminated[/]")
+        return False
+    except SSHError:
+        # Re-raise our custom SSH errors
+        raise
+    except Exception as e:
+        # Unexpected errors - log and report
+        logger.error(f"Unexpected SSH connection error: {e}")
+        console.print(f"[red]SSH error: {e}[/]")
+        console.print("[yellow]Try: bruno-vast list to check instance status[/]")
+        return False
+
+
 def run_ssh_command(
     conn: "Connection",
     command: str,
@@ -434,7 +487,7 @@ def run_ssh_command(
     """Run a command via SSH with timeout and return stdout.
 
     Args:
-        conn: Fabric SSH connection
+        conn: Fabric SSH connection (must already be opened with safe_ssh_connect)
         command: Command to execute
         hide: Hide command output (default: True)
         timeout: Command timeout in seconds (default: 60)

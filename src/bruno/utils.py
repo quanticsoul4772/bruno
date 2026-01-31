@@ -495,7 +495,9 @@ def get_readme_intro(
 
     return f"""# This is a decensored version of {
         model_link
-    }, made using [Bruno](https://github.com/quanticsoul4772/bruno) v{version("bruno-ai")}
+    }, made using [Bruno](https://github.com/quanticsoul4772/bruno) v{
+        version("bruno-ai")
+    }
 
 ## Abliteration parameters
 

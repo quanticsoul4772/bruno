@@ -9,8 +9,12 @@ import torch
 import torch.nn.functional as F
 
 from .config import Settings
+from .error_tracker import record_suppressed_error
+from .logging import get_logger
 from .model import Model
 from .utils import load_prompts, print
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from transformers import Pipeline
@@ -247,12 +251,34 @@ class Evaluator:
                     "Falling back to string matching only.[/]"
                 )
                 self.neural_detector = None
-            except Exception as e:
+            except (ImportError, torch.cuda.OutOfMemoryError):
+                # Already handled above - these are expected failure modes
+                pass
+            except RuntimeError as e:
+                # Model-specific errors (loading, inference)
+                logger.warning(f"Neural detector initialization failed: {e}")
                 print(
                     f"[yellow]Warning: Failed to initialize neural refusal detector: {e}. "
                     "Falling back to string matching only.[/]"
                 )
                 self.neural_detector = None
+            except Exception as e:
+                # Truly unexpected errors - log with traceback and re-raise
+                record_suppressed_error(
+                    error=e,
+                    context="neural_detector_init",
+                    module="evaluator",
+                    severity="error",
+                    details={"model": settings.neural_detection_model},
+                    include_traceback=True,
+                )
+                logger.error(f"Unexpected error initializing neural detector: {e}")
+                print(
+                    f"[red]Unexpected error initializing neural detector: {e}. "
+                    "This may indicate a serious issue.[/]"
+                )
+                # Don't silently continue on unexpected errors - re-raise
+                raise
         self._use_neural_for_optuna = (
             settings.neural_detection_for_optuna and self.neural_detector is not None
         )

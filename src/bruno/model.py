@@ -35,6 +35,7 @@ from .constants import (
 from .error_tracker import record_suppressed_error
 from .exceptions import (
     ConfigurationError,
+    ModelInferenceError,
     ModelLoadError,
     SacredDirectionError,
     SupervisedProbeError,
@@ -868,7 +869,32 @@ class Model:
         # Optionally compile the model for faster inference (~1.5-2x speedup)
         if settings.compile:
             print("* Compiling model with torch.compile()...")
-            self.model = torch.compile(self.model, mode="reduce-overhead")
+            try:
+                self.model = torch.compile(self.model, mode="reduce-overhead")
+                print("  * Model compiled successfully")
+            except RuntimeError as e:
+                # torch.compile() can fail on Windows, old CUDA, or unsupported ops
+                if "compile" in str(e).lower() or "dynamo" in str(e).lower():
+                    logger.warning(
+                        f"torch.compile() failed: {e}. Continuing with uncompiled model."
+                    )
+                    print(
+                        "[yellow]  * Compilation failed, using uncompiled model "
+                        "(inference will be slower)[/]"
+                    )
+                else:
+                    # Unexpected RuntimeError - re-raise
+                    raise ModelLoadError(
+                        f"Failed to compile model: {e}. Try --compile false"
+                    ) from e
+            except Exception as e:
+                # Truly unexpected errors
+                logger.error(f"Unexpected error during model compilation: {e}")
+                print(
+                    f"[yellow]  * Unexpected compilation error: {e}. "
+                    f"Using uncompiled model.[/]"
+                )
+                # Continue without compilation rather than crashing
 
     def _create_layer_weights_cache(self) -> dict[int, dict[str, list[Tensor]]]:
         """Create selective cache of abliterable component weights.
@@ -1207,8 +1233,27 @@ class Model:
         device_projectors_cache: dict[torch.device, Tensor] = {}
 
         def get_device_projector(projector: Tensor, device: torch.device) -> Tensor:
+            """Get device-specific projector with OOM protection.
+
+            Returns:
+                Projector on specified device, or CPU fallback if OOM
+            """
             if device not in device_projectors_cache:
-                device_projectors_cache[device] = projector.to(device)
+                try:
+                    device_projectors_cache[device] = projector.to(device)
+                except torch.cuda.OutOfMemoryError:
+                    # OOM during transfer - use CPU fallback
+                    empty_cache()
+                    logger.warning(
+                        f"GPU OOM transferring projector to {device}. Using CPU fallback."
+                    )
+                    device_projectors_cache[device] = projector.to("cpu")
+                except RuntimeError as e:
+                    if "CUDA" in str(e) or "cuda" in str(e):
+                        raise ModelInferenceError(
+                            f"CUDA error transferring projector to {device}: {e}"
+                        ) from e
+                    raise
             return device_projectors_cache[device]
 
         # Note that some implementations of abliteration also orthogonalize
@@ -2930,13 +2975,19 @@ class Model:
         circuits: list[RefusalCircuit],
         cache_path: str,
     ) -> None:
-        """Save discovered circuits to a JSON cache file.
+        """Save discovered circuits to a JSON cache file with error handling.
 
         Args:
             circuits: List of RefusalCircuit objects to save
             cache_path: Path to the JSON cache file
+
+        Note:
+            Uses atomic write (temp file + rename) to prevent corruption.
+            Non-critical failures (disk full, permission denied) are logged
+            but don't raise exceptions - circuit discovery continues.
         """
         import json
+        from pathlib import Path
 
         cache_data = {
             "model": self.settings.model,
@@ -2950,10 +3001,59 @@ class Model:
             ],
         }
 
-        with open(cache_path, "w") as f:
-            json.dump(cache_data, f, indent=2)
+        try:
+            # Atomic write using temp file to prevent corruption
+            temp_path = f"{cache_path}.tmp"
+            with open(temp_path, "w") as f:
+                json.dump(cache_data, f, indent=2)
 
-        print(f"  * Saved {len(circuits)} circuits to {cache_path}")
+            # Atomic rename (POSIX) or best-effort (Windows)
+            Path(temp_path).replace(cache_path)
+
+            print(f"  * Saved {len(circuits)} circuits to {cache_path}")
+
+        except OSError as e:
+            error_msg = str(e).lower()
+            if "disk" in error_msg or "space" in error_msg:
+                logger.warning(
+                    f"Insufficient disk space for circuit cache: {e}. "
+                    f"Circuits will be recomputed on next run."
+                )
+                print(
+                    "[yellow]  * Warning: Insufficient disk space, circuit cache not saved[/]"
+                )
+            elif "permission" in error_msg:
+                logger.warning(
+                    f"Permission denied writing circuit cache to {cache_path}: {e}. "
+                    f"Check directory permissions."
+                )
+                print(
+                    f"[yellow]  * Warning: Permission denied for {cache_path}, cache not saved[/]"
+                )
+            else:
+                # Other OSErrors - log but don't crash (cache is optional)
+                record_suppressed_error(
+                    error=e,
+                    context="circuit_cache_save",
+                    module="model",
+                    severity="warning",
+                    details={"cache_path": cache_path, "n_circuits": len(circuits)},
+                )
+                logger.warning(f"Failed to save circuit cache: {e}")
+                print(f"[yellow]  * Warning: Failed to save circuit cache: {e}[/]")
+
+        except Exception as e:
+            # Unexpected errors - log with traceback but don't crash
+            record_suppressed_error(
+                error=e,
+                context="circuit_cache_save",
+                module="model",
+                severity="error",
+                details={"cache_path": cache_path, "n_circuits": len(circuits)},
+                include_traceback=True,
+            )
+            logger.error(f"Unexpected error saving circuit cache: {e}")
+            print(f"[yellow]  * Warning: Unexpected error saving cache: {e}[/]")
 
     def load_circuits_from_cache(
         self,
