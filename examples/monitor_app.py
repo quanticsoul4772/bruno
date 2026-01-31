@@ -441,13 +441,23 @@ def create_ui() -> gr.Blocks:
             </div>
         """)
 
+        # Auto-refresh timer (Gradio 6.x compatible)
+        timer = gr.Timer(value=REFRESH_INTERVAL, active=True)
+
         with gr.Row():
             # Left sidebar - Summary
             with gr.Column(scale=1):
                 gr.Markdown("### Study Info")
                 summary_md = gr.Markdown(get_summary_text())
 
-                refresh_btn = gr.Button("🔄 Refresh Now", variant="primary")
+                with gr.Row():
+                    refresh_btn = gr.Button("🔄 Refresh Now", variant="primary", scale=2)
+                    auto_refresh_toggle = gr.Checkbox(
+                        label="Auto",
+                        value=True,
+                        scale=1,
+                        info=f"Every {REFRESH_INTERVAL}s",
+                    )
 
                 with gr.Accordion("Study Selection", open=False):
                     gr.Markdown(list_available_studies())
@@ -460,7 +470,7 @@ def create_ui() -> gr.Blocks:
 
                 with gr.Accordion("Configuration", open=False):
                     gr.Markdown(f"**Storage:** `{STORAGE_URL}`")
-                    gr.Markdown(f"**Auto-refresh:** Every {REFRESH_INTERVAL}s")
+                    gr.Markdown(f"**Auto-refresh:** Every {REFRESH_INTERVAL}s (toggle with checkbox)")
 
             # Main content - Plots
             with gr.Column(scale=3):
@@ -530,9 +540,8 @@ def create_ui() -> gr.Blocks:
             ],
         )
 
-        # Auto-refresh using Gradio's built-in timer
-        # Note: This creates a timer that fires every REFRESH_INTERVAL seconds
-        demo.load(
+        # Auto-refresh using gr.Timer (Gradio 6.x compatible)
+        timer.tick(
             refresh_all,
             outputs=[
                 summary_md,
@@ -543,7 +552,13 @@ def create_ui() -> gr.Blocks:
                 timeline_plot,
                 trials_table,
             ],
-            every=REFRESH_INTERVAL,
+        )
+
+        # Toggle auto-refresh on/off
+        auto_refresh_toggle.change(
+            lambda active: gr.Timer(value=REFRESH_INTERVAL, active=active),
+            inputs=[auto_refresh_toggle],
+            outputs=[timer],
         )
 
     return demo
