@@ -1,4 +1,4 @@
-"""Custom exception hierarchy for heretic.
+"""Custom exception hierarchy for Bruno.
 
 This module defines a comprehensive exception hierarchy for all error types
 that can occur during neural behavior modification operations.

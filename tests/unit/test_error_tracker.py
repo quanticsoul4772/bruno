@@ -2,7 +2,7 @@
 
 import pytest
 
-from heretic.error_tracker import (
+from bruno.error_tracker import (
     ErrorSeverity,
     ErrorTracker,
     SuppressedError,

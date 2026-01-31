@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 from torch import Tensor
 
 if TYPE_CHECKING:
-    from heretic.config import Settings
-    from heretic.model import Model
+    from bruno.config import Settings
+    from bruno.model import Model
 
 
 class DirectionExtractor(ABC):

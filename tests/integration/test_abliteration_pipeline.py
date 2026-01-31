@@ -11,7 +11,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from heretic.constants import (
+from bruno.constants import (
     EPSILON,
     LOW_MAGNITUDE_WARNING,
     NEAR_ZERO,
@@ -153,7 +153,7 @@ class TestConfigValidation:
 
     def test_valid_config_passes(self):
         """Test that valid configuration values pass validation."""
-        from heretic.config import LayerRangeProfileConfig
+        from bruno.config import LayerRangeProfileConfig
 
         profile = LayerRangeProfileConfig(
             range_start=0.0,
@@ -178,7 +178,7 @@ class TestPhaseModules:
 
     def test_dataset_bundle_creation(self):
         """Test DatasetBundle creation."""
-        from heretic.phases import DatasetBundle
+        from bruno.phases import DatasetBundle
 
         bundle = DatasetBundle(
             good_prompts=["Hello, how are you?"],
@@ -191,7 +191,7 @@ class TestPhaseModules:
 
     def test_dataset_bundle_with_optional_fields(self):
         """Test DatasetBundle with optional fields populated."""
-        from heretic.phases import DatasetBundle
+        from bruno.phases import DatasetBundle
 
         bundle = DatasetBundle(
             good_prompts=["Hello"],
@@ -208,7 +208,7 @@ class TestPhaseModules:
 
     def test_direction_extraction_result_creation(self):
         """Test DirectionExtractionResult creation."""
-        from heretic.phases import DirectionExtractionResult
+        from bruno.phases import DirectionExtractionResult
 
         result = DirectionExtractionResult(
             refusal_directions=torch.randn(32, 768),
@@ -221,7 +221,7 @@ class TestPhaseModules:
 
     def test_direction_extraction_result_multi_direction(self):
         """Test DirectionExtractionResult with multi-direction."""
-        from heretic.phases import DirectionExtractionResult
+        from bruno.phases import DirectionExtractionResult
 
         result = DirectionExtractionResult(
             refusal_directions=torch.randn(32, 768),
@@ -237,7 +237,7 @@ class TestPhaseModules:
 
     def test_phase_module_imports(self):
         """Test that all phase module exports are importable."""
-        from heretic.phases import (
+        from bruno.phases import (
             DatasetBundle,
             DirectionExtractionResult,
             create_study,

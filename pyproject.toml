@@ -1,14 +1,15 @@
 [project]
-name = "heretic-llm"
-version = "1.0.1"
-description = "Fully automatic censorship removal for language models"
+name = "bruno-ai"
+version = "2.0.0"
+description = "Neural behavior engineering framework through activation direction analysis"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 authors = [
-    { name = "Philipp Emanuel Weidmann", email = "pew@worldwidemann.com" }
+    { name = "Philipp Emanuel Weidmann", email = "pew@worldwidemann.com" },
+    { name = "quanticsoul4772", email = "quanticsoul4772@users.noreply.github.com" }
 ]
 requires-python = ">=3.10"
-keywords = ["llm", "transformer", "abliteration"]
+keywords = ["llm", "transformer", "abliteration", "neural", "behavior", "alignment"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -36,6 +37,8 @@ dependencies = [
     "transformers>=4.55.2",
     "click>=8.1.8",  # Match ddgs requirement
     "fabric>=3.2.0",
+    # PyTorch with CUDA support (platform-specific)
+    "torch>=2.5.0",
 ]
 
 [dependency-groups]
@@ -49,28 +52,38 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/p-e-w/heretic"
-Documentation = "https://github.com/p-e-w/heretic"
-Repository = "https://github.com/p-e-w/heretic.git"
-Issues = "https://github.com/p-e-w/heretic/issues"
-Changelog = "https://github.com/p-e-w/heretic/commits/master/"
+Homepage = "https://github.com/quanticsoul4772/bruno"
+Documentation = "https://github.com/quanticsoul4772/bruno"
+Repository = "https://github.com/quanticsoul4772/bruno.git"
+Issues = "https://github.com/quanticsoul4772/bruno/issues"
+Changelog = "https://github.com/quanticsoul4772/bruno/commits/master/"
+Original = "https://github.com/p-e-w/heretic"
 
 [project.scripts]
-heretic = "heretic.main:main"
-heretic-vast = "heretic.vast:main"
+bruno = "bruno.main:main"
+bruno-vast = "bruno.vast:main"
 
 [build-system]
 requires = ["uv_build>=0.8.11,<0.9.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "heretic"
-data-files = { "heretic" = ["config.default.toml"] }
+module-name = "bruno"
+data-files = { "bruno" = ["config.default.toml"] }
+
+# PyTorch CUDA index configuration
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=src/heretic --cov-report=term-missing"
+addopts = "--cov=src/bruno --cov-report=term-missing"
 markers = [
     "slow: marks tests as slow (deselect with '-m not slow')",
     "integration: marks integration tests",

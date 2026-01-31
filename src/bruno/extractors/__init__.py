@@ -8,7 +8,7 @@ from language models. The default extractor handles refusal behavior, but
 custom extractors can be created for other behaviors like verbosity, hedging, etc.
 
 Usage:
-    from heretic.extractors import get_extractor, list_extractors
+    from bruno.extractors import get_extractor, list_extractors
 
     # Get the default refusal extractor
     extractor = get_extractor("refusal")

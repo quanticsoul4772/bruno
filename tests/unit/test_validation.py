@@ -16,7 +16,7 @@ class TestValidationMetrics:
 
     def test_metrics_creation(self):
         """Test creating ValidationMetrics with valid values."""
-        from heretic.validation import ValidationMetrics
+        from bruno.validation import ValidationMetrics
 
         metrics = ValidationMetrics(
             refusal_count=10,
@@ -34,7 +34,7 @@ class TestValidationMetrics:
 
     def test_metrics_default_mmlu(self):
         """Test ValidationMetrics with default MMLU values."""
-        from heretic.validation import ValidationMetrics
+        from bruno.validation import ValidationMetrics
 
         metrics = ValidationMetrics(
             refusal_count=5,
@@ -52,7 +52,7 @@ class TestValidationReport:
 
     def test_report_creation(self):
         """Test creating ValidationReport."""
-        from heretic.validation import ValidationMetrics, ValidationReport
+        from bruno.validation import ValidationMetrics, ValidationReport
 
         baseline = ValidationMetrics(
             refusal_count=20,
@@ -73,7 +73,7 @@ class TestValidationReport:
 
     def test_report_compute_improvements(self):
         """Test computing improvement metrics."""
-        from heretic.validation import ValidationMetrics, ValidationReport
+        from bruno.validation import ValidationMetrics, ValidationReport
 
         baseline = ValidationMetrics(
             refusal_count=20,
@@ -106,7 +106,7 @@ class TestValidationReport:
 
     def test_report_capability_not_preserved_high_kl(self):
         """Test capability_preserved is False when KL is too high."""
-        from heretic.validation import ValidationMetrics, ValidationReport
+        from bruno.validation import ValidationMetrics, ValidationReport
 
         baseline = ValidationMetrics(
             refusal_count=20,
@@ -135,7 +135,7 @@ class TestValidationReport:
 
     def test_report_capability_not_preserved_mmlu_drop(self):
         """Test capability_preserved is False when MMLU drops too much."""
-        from heretic.validation import ValidationMetrics, ValidationReport
+        from bruno.validation import ValidationMetrics, ValidationReport
 
         baseline = ValidationMetrics(
             refusal_count=20,
@@ -164,7 +164,7 @@ class TestValidationReport:
 
     def test_report_to_dict(self):
         """Test converting report to dictionary."""
-        from heretic.validation import ValidationMetrics, ValidationReport
+        from bruno.validation import ValidationMetrics, ValidationReport
 
         baseline = ValidationMetrics(
             refusal_count=10,
@@ -186,7 +186,7 @@ class TestValidationReport:
 
     def test_report_save_load(self):
         """Test saving and loading report from JSON."""
-        from heretic.validation import ValidationMetrics, ValidationReport
+        from bruno.validation import ValidationMetrics, ValidationReport
 
         baseline = ValidationMetrics(
             refusal_count=15,
@@ -307,7 +307,7 @@ class TestMMLUCategoryValidation:
         This test prevents bugs like using 'world_history' instead of
         'high_school_world_history' (which was a real bug fixed in commit 10e7d11).
         """
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(model="test-model")
 
@@ -323,7 +323,7 @@ class TestMMLUCategoryValidation:
 
     def test_default_mmlu_categories_module_constant_is_valid(self):
         """Test that DEFAULT_MMLU_CATEGORIES constant contains valid categories."""
-        from heretic.validation import DEFAULT_MMLU_CATEGORIES
+        from bruno.validation import DEFAULT_MMLU_CATEGORIES
 
         invalid_categories = []
         for category in DEFAULT_MMLU_CATEGORIES:
@@ -370,7 +370,7 @@ class TestMMLUResult:
 
     def test_mmlu_result_creation(self):
         """Test creating MMLUResult."""
-        from heretic.validation import MMLUResult
+        from bruno.validation import MMLUResult
 
         result = MMLUResult(
             category="abstract_algebra",
@@ -390,7 +390,7 @@ class TestMMLUEvaluator:
 
     def test_format_question(self):
         """Test question formatting."""
-        from heretic.validation import MMLUEvaluator
+        from bruno.validation import MMLUEvaluator
 
         evaluator = MMLUEvaluator(model=MagicMock())
 
@@ -403,9 +403,48 @@ class TestMMLUEvaluator:
         assert "D. 6" in formatted
         assert "Answer:" in formatted
 
+    def test_load_category_parses_choices_list(self):
+        """Test that _load_category correctly parses the 'choices' list format.
+        
+        The cais/mmlu dataset uses a 'choices' list, NOT separate A/B/C/D columns.
+        This was a bug fixed after discovering the dataset structure:
+        {'question': '...', 'choices': ['opt1', 'opt2', 'opt3', 'opt4'], 'answer': 1}
+        """
+        from bruno.validation import MMLUEvaluator
+        
+        evaluator = MMLUEvaluator(model=MagicMock())
+        
+        # Mock the dataset loading with the actual cais/mmlu format
+        mock_dataset = [
+            {
+                "question": "Find the degree for the given field extension",
+                "subject": "abstract_algebra",
+                "choices": ["0", "4", "2", "6"],  # This is how cais/mmlu stores choices
+                "answer": 1,  # Integer index (0-3)
+            },
+            {
+                "question": "What is the order of the group?",
+                "subject": "abstract_algebra", 
+                "choices": ["1", "2", "4", "8"],
+                "answer": 2,
+            },
+        ]
+        
+        with patch("heretic.validation.load_dataset", return_value=mock_dataset):
+            with patch("heretic.validation.print"):
+                examples = evaluator._load_category("abstract_algebra")
+        
+        assert len(examples) == 2
+        # Verify choices are parsed correctly from the 'choices' list
+        assert examples[0]["choices"] == ["0", "4", "2", "6"]
+        assert examples[1]["choices"] == ["1", "2", "4", "8"]
+        # Verify answer is converted from int to letter
+        assert examples[0]["answer"] == "B"  # index 1 -> B
+        assert examples[1]["answer"] == "C"  # index 2 -> C
+
     def test_extract_answer_single_letter(self):
         """Test extracting answer when response is a single letter."""
-        from heretic.validation import MMLUEvaluator
+        from bruno.validation import MMLUEvaluator
 
         evaluator = MMLUEvaluator(model=MagicMock())
 
@@ -416,7 +455,7 @@ class TestMMLUEvaluator:
 
     def test_extract_answer_with_text(self):
         """Test extracting answer from longer response."""
-        from heretic.validation import MMLUEvaluator
+        from bruno.validation import MMLUEvaluator
 
         evaluator = MMLUEvaluator(model=MagicMock())
 
@@ -426,7 +465,7 @@ class TestMMLUEvaluator:
 
     def test_extract_answer_invalid(self):
         """Test extracting answer from invalid response."""
-        from heretic.validation import MMLUEvaluator
+        from bruno.validation import MMLUEvaluator
 
         evaluator = MMLUEvaluator(model=MagicMock())
 
@@ -434,8 +473,12 @@ class TestMMLUEvaluator:
         assert evaluator._extract_answer("XY") is None  # Short but no valid letter
 
     def test_evaluate_category_with_mocked_data(self):
-        """Test evaluating a category with mocked dataset."""
-        from heretic.validation import MMLUEvaluator
+        """Test evaluating a category with mocked dataset.
+        
+        Uses the standardized format that _load_category produces:
+        {'question': '...', 'choices': [...], 'answer': 'A'/'B'/'C'/'D'}
+        """
+        from bruno.validation import MMLUEvaluator
 
         mock_model = MagicMock()
         # Return correct answers for first 2, wrong for last 2
@@ -448,7 +491,7 @@ class TestMMLUEvaluator:
             n_few_shot=2,
         )
 
-        # Mock the dataset loading
+        # Mock the dataset in the standardized format (after _load_category processing)
         evaluator._datasets["test_category"] = [
             # Few-shot examples (first 2)
             {"question": "Q1", "choices": ["a", "b", "c", "d"], "answer": "A"},
@@ -473,8 +516,8 @@ class TestAbliterationValidator:
 
     def test_validator_initialization(self):
         """Test validator initialization."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",
@@ -494,8 +537,8 @@ class TestAbliterationValidator:
 
     def test_validator_with_mmlu_enabled(self):
         """Test validator initialization with MMLU enabled."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",
@@ -514,8 +557,8 @@ class TestAbliterationValidator:
 
     def test_establish_baseline(self):
         """Test establishing baseline metrics."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",
@@ -540,8 +583,8 @@ class TestAbliterationValidator:
 
     def test_measure_post_abliteration(self):
         """Test measuring post-abliteration metrics."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",
@@ -567,8 +610,8 @@ class TestAbliterationValidator:
 
     def test_get_report_without_baseline_raises(self):
         """Test get_report raises error without baseline."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",
@@ -583,8 +626,8 @@ class TestAbliterationValidator:
 
     def test_get_report_after_baseline_and_post(self):
         """Test get_report after both baseline and post-abliteration."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",
@@ -617,8 +660,8 @@ class TestAbliterationValidator:
 
     def test_print_summary(self):
         """Test print_summary doesn't crash."""
-        from heretic.config import Settings
-        from heretic.validation import AbliterationValidator
+        from bruno.config import Settings
+        from bruno.validation import AbliterationValidator
 
         settings = Settings(
             model="test-model",

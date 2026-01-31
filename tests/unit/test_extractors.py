@@ -13,7 +13,7 @@ class TestExtractorRegistry:
 
     def test_list_extractors_includes_refusal(self):
         """Test refusal extractor is registered by default."""
-        from heretic.extractors import list_extractors
+        from bruno.extractors import list_extractors
 
         extractors = list_extractors()
 
@@ -21,7 +21,7 @@ class TestExtractorRegistry:
 
     def test_get_extractor_returns_class(self):
         """Test get_extractor returns the extractor class."""
-        from heretic.extractors import RefusalDirectionExtractor, get_extractor
+        from bruno.extractors import RefusalDirectionExtractor, get_extractor
 
         extractor_cls = get_extractor("refusal")
 
@@ -29,14 +29,14 @@ class TestExtractorRegistry:
 
     def test_get_extractor_unknown_raises(self):
         """Test get_extractor raises KeyError for unknown name."""
-        from heretic.extractors import get_extractor
+        from bruno.extractors import get_extractor
 
         with pytest.raises(KeyError, match="Unknown extractor.*nonexistent"):
             get_extractor("nonexistent")
 
     def test_register_extractor(self):
         """Test registering a custom extractor."""
-        from heretic.extractors import (
+        from bruno.extractors import (
             DirectionExtractor,
             get_extractor,
             register_extractor,
@@ -52,7 +52,7 @@ class TestExtractorRegistry:
 
     def test_register_extractor_validates_type(self):
         """Test register_extractor rejects non-DirectionExtractor classes."""
-        from heretic.extractors import register_extractor
+        from bruno.extractors import register_extractor
 
         class NotAnExtractor:
             pass
@@ -66,14 +66,14 @@ class TestDirectionExtractor:
 
     def test_cannot_instantiate_abstract(self):
         """Test DirectionExtractor cannot be instantiated directly."""
-        from heretic.extractors import DirectionExtractor
+        from bruno.extractors import DirectionExtractor
 
         with pytest.raises(TypeError, match="abstract"):
             DirectionExtractor()
 
     def test_subclass_must_implement_get_prompts(self):
         """Test subclass must implement get_prompts."""
-        from heretic.extractors import DirectionExtractor
+        from bruno.extractors import DirectionExtractor
 
         class IncompleteExtractor(DirectionExtractor):
             pass
@@ -85,7 +85,7 @@ class TestDirectionExtractor:
         """Test default extract_directions implementation."""
         import torch
 
-        from heretic.extractors import DirectionExtractor
+        from bruno.extractors import DirectionExtractor
 
         class TestExtractor(DirectionExtractor):
             def get_prompts(self, settings):
@@ -115,7 +115,7 @@ class TestRefusalDirectionExtractor:
 
     def test_get_prompts_loads_from_settings(self):
         """Test get_prompts loads datasets from settings."""
-        from heretic.extractors import RefusalDirectionExtractor
+        from bruno.extractors import RefusalDirectionExtractor
 
         extractor = RefusalDirectionExtractor()
 

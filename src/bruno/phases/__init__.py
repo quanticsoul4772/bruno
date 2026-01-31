@@ -12,9 +12,9 @@ workflow into discrete, testable phases:
 - model_saving: Save and upload abliterated models
 
 Usage:
-    from heretic.phases import DatasetBundle, DirectionExtractionResult
-    from heretic.phases.dataset_loading import load_datasets
-    from heretic.phases.direction_extraction import extract_directions
+    from bruno.phases import DatasetBundle, DirectionExtractionResult
+    from bruno.phases.dataset_loading import load_datasets
+    from bruno.phases.direction_extraction import extract_directions
 """
 
 from .dataset_loading import DatasetBundle, load_datasets

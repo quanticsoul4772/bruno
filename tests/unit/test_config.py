@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 def test_settings_defaults():
     """Test default settings values."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     settings = Settings(model="test-model")
 
@@ -21,7 +21,7 @@ def test_settings_defaults():
 
 def test_settings_validation_requires_model():
     """Test Pydantic validation catches missing model."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     with pytest.raises(ValidationError):
         Settings()  # Missing required 'model' field
@@ -29,7 +29,7 @@ def test_settings_validation_requires_model():
 
 def test_settings_compile_option():
     """Test torch.compile() configuration option."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Default is False
     settings = Settings(model="test")
@@ -42,7 +42,7 @@ def test_settings_compile_option():
 
 def test_settings_refusal_check_tokens():
     """Test early stopping token configuration."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Default is 30
     settings = Settings(model="test")
@@ -55,12 +55,12 @@ def test_settings_refusal_check_tokens():
 
 def test_settings_storage_and_study_name():
     """Test Optuna persistence settings."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Defaults
     settings = Settings(model="test")
-    assert settings.storage == "sqlite:///heretic_study.db"
-    assert settings.study_name == "heretic_study"
+    assert settings.storage == "sqlite:///bruno_study.db"
+    assert settings.study_name == "bruno_study"
 
     # Can be customized
     settings = Settings(
@@ -74,7 +74,7 @@ def test_settings_storage_and_study_name():
 
 def test_settings_refusal_markers():
     """Test refusal markers configuration."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     settings = Settings(model="test")
 
@@ -91,7 +91,7 @@ def test_settings_refusal_markers():
 
 def test_settings_dataset_specification():
     """Test dataset specification defaults."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     settings = Settings(model="test")
 
@@ -106,7 +106,7 @@ def test_settings_dataset_specification():
 
 def test_settings_kl_divergence_scale():
     """Test KL divergence scale configuration."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Default is 1.0
     settings = Settings(model="test")
@@ -119,7 +119,7 @@ def test_settings_kl_divergence_scale():
 
 def test_settings_max_response_length():
     """Test max response length configuration."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Default is 100
     settings = Settings(model="test")
@@ -132,7 +132,7 @@ def test_settings_max_response_length():
 
 def test_settings_auto_select():
     """Test auto-select configuration for automation."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Default is False
     settings = Settings(model="test")
@@ -145,7 +145,7 @@ def test_settings_auto_select():
 
 def test_settings_hf_upload():
     """Test HuggingFace upload configuration."""
-    from heretic.config import Settings
+    from bruno.config import Settings
 
     # Default is None
     settings = Settings(model="test")

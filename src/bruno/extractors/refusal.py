@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from .base import DirectionExtractor
 
 if TYPE_CHECKING:
-    from heretic.config import Settings
+    from bruno.config import Settings
 
 
 class RefusalDirectionExtractor(DirectionExtractor):
@@ -31,7 +31,7 @@ class RefusalDirectionExtractor(DirectionExtractor):
         Uses the good_prompts and bad_prompts dataset specifications
         from the heretic configuration.
         """
-        from heretic.utils import load_prompts
+        from bruno.utils import load_prompts
 
         # Load from configured datasets
         positive_prompts = load_prompts(settings.good_prompts)

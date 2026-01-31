@@ -10,7 +10,7 @@ suppressed (not re-raised) throughout the codebase. This enables:
 - Reporting: Generate summaries of suppressed errors
 
 Usage:
-    from heretic.error_tracker import error_tracker, record_suppressed_error
+    from bruno.error_tracker import error_tracker, record_suppressed_error
 
     try:
         risky_operation()

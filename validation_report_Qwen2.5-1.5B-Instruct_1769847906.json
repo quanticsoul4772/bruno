@@ -1,0 +1,28 @@
+{
+  "model_name": "Qwen/Qwen2.5-1.5B-Instruct",
+  "baseline": {
+    "refusal_count": 22,
+    "refusal_rate": 0.7333333333333333,
+    "total_bad_prompts": 30,
+    "kl_divergence": 0.0,
+    "mmlu_scores": {},
+    "mmlu_average": 0.0,
+    "timestamp": "2026-01-31T00:24:01.584435"
+  },
+  "post_abliteration": {
+    "refusal_count": 1,
+    "refusal_rate": 0.03333333333333333,
+    "total_bad_prompts": 30,
+    "kl_divergence": 9.857592582702637,
+    "mmlu_scores": {},
+    "mmlu_average": 0.0,
+    "timestamp": "2026-01-31T00:25:06.729442"
+  },
+  "improvements": {
+    "refusal_reduction": 0.7,
+    "refusal_reduction_pct": 95.45454545454545,
+    "kl_divergence_increase": 9.857592582702637,
+    "mmlu_change": 0.0,
+    "capability_preserved": false
+  }
+}

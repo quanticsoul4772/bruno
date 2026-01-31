@@ -11,7 +11,7 @@ class TestFormatDuration:
 
     def test_format_duration_seconds_only(self):
         """Test formatting durations under 1 minute."""
-        from heretic.utils import format_duration
+        from bruno.utils import format_duration
 
         assert format_duration(0) == "0s"
         assert format_duration(1) == "1s"
@@ -20,7 +20,7 @@ class TestFormatDuration:
 
     def test_format_duration_minutes_and_seconds(self):
         """Test formatting durations between 1-60 minutes."""
-        from heretic.utils import format_duration
+        from bruno.utils import format_duration
 
         assert format_duration(60) == "1m 0s"
         assert format_duration(90) == "1m 30s"
@@ -29,7 +29,7 @@ class TestFormatDuration:
 
     def test_format_duration_hours_and_minutes(self):
         """Test formatting durations over 1 hour."""
-        from heretic.utils import format_duration
+        from bruno.utils import format_duration
 
         assert format_duration(3600) == "1h 0m"
         assert format_duration(3660) == "1h 1m"
@@ -38,7 +38,7 @@ class TestFormatDuration:
 
     def test_format_duration_rounds(self):
         """Test that fractional seconds are rounded."""
-        from heretic.utils import format_duration
+        from bruno.utils import format_duration
 
         assert format_duration(1.4) == "1s"
         assert format_duration(1.6) == "2s"
@@ -50,8 +50,8 @@ class TestLoadPrompts:
 
     def test_load_prompts_from_huggingface(self):
         """Test loading prompts from HuggingFace dataset."""
-        from heretic.config import DatasetSpecification
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="test-org/test-dataset",
@@ -75,8 +75,8 @@ class TestLoadPrompts:
 
     def test_load_prompts_from_local_disk(self, tmp_path):
         """Test loading prompts from local dataset."""
-        from heretic.config import DatasetSpecification
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset=str(tmp_path),
@@ -98,8 +98,8 @@ class TestLoadPrompts:
     def test_load_prompts_c4_streaming(self):
         """Test that C4 dataset uses streaming to avoid large downloads."""
 
-        from heretic.config import DatasetSpecification
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="allenai/c4",
@@ -138,9 +138,9 @@ class TestLoadPrompts:
         """Test that C4 without config fails loudly."""
         import pytest
 
-        from heretic.config import DatasetSpecification
-        from heretic.exceptions import DatasetConfigError
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.exceptions import DatasetConfigError
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="allenai/c4",
@@ -161,9 +161,9 @@ class TestLoadPrompts:
         """Test that C4 without sample count fails loudly."""
         import pytest
 
-        from heretic.config import DatasetSpecification
-        from heretic.exceptions import DatasetConfigError
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.exceptions import DatasetConfigError
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="allenai/c4",
@@ -185,9 +185,9 @@ class TestLoadPrompts:
         import pytest
         from requests.exceptions import ConnectionError as RequestsConnectionError
 
-        from heretic.config import DatasetSpecification
-        from heretic.exceptions import NetworkTimeoutError
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.exceptions import NetworkTimeoutError
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="allenai/c4",
@@ -215,8 +215,8 @@ class TestLoadPrompts:
         """Test that early stream exhaustion raises error."""
         import pytest
 
-        from heretic.config import DatasetSpecification
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="allenai/c4",
@@ -243,8 +243,8 @@ class TestLoadPrompts:
         """Test that iteration errors during streaming raise clear errors."""
         import pytest
 
-        from heretic.config import DatasetSpecification
-        from heretic.utils import load_prompts
+        from bruno.config import DatasetSpecification
+        from bruno.utils import load_prompts
 
         spec = DatasetSpecification(
             dataset="allenai/c4",
@@ -277,37 +277,37 @@ class TestParseSplitCount:
 
     def test_parse_split_count_simple_slice(self):
         """Test parsing simple slice like train[:200]."""
-        from heretic.utils import _parse_split_count
+        from bruno.utils import _parse_split_count
 
         assert _parse_split_count("train[:200]") == 200
 
     def test_parse_split_count_range_slice(self):
         """Test parsing range slice like train[400:600]."""
-        from heretic.utils import _parse_split_count
+        from bruno.utils import _parse_split_count
 
         assert _parse_split_count("train[400:600]") == 200
 
     def test_parse_split_count_small_range(self):
         """Test parsing small range like train[100:150]."""
-        from heretic.utils import _parse_split_count
+        from bruno.utils import _parse_split_count
 
         assert _parse_split_count("train[100:150]") == 50
 
     def test_parse_split_count_no_slice(self):
         """Test parsing split without slice notation."""
-        from heretic.utils import _parse_split_count
+        from bruno.utils import _parse_split_count
 
         assert _parse_split_count("train") is None
 
     def test_parse_split_count_validation_split(self):
         """Test parsing validation split with slice."""
-        from heretic.utils import _parse_split_count
+        from bruno.utils import _parse_split_count
 
         assert _parse_split_count("validation[:100]") == 100
 
     def test_parse_split_count_zero_start(self):
         """Test parsing slice starting from zero."""
-        from heretic.utils import _parse_split_count
+        from bruno.utils import _parse_split_count
 
         assert _parse_split_count("train[0:50]") == 50
 
@@ -317,7 +317,7 @@ class TestBatchify:
 
     def test_batchify_even_split(self):
         """Test batchify with evenly divisible items."""
-        from heretic.utils import batchify
+        from bruno.utils import batchify
 
         items = [1, 2, 3, 4, 5, 6]
         batches = batchify(items, 2)
@@ -326,7 +326,7 @@ class TestBatchify:
 
     def test_batchify_uneven_split(self):
         """Test batchify with remainder items."""
-        from heretic.utils import batchify
+        from bruno.utils import batchify
 
         items = [1, 2, 3, 4, 5]
         batches = batchify(items, 2)
@@ -335,7 +335,7 @@ class TestBatchify:
 
     def test_batchify_single_batch(self):
         """Test batchify when batch_size >= len(items)."""
-        from heretic.utils import batchify
+        from bruno.utils import batchify
 
         items = [1, 2, 3]
         batches = batchify(items, 10)
@@ -344,7 +344,7 @@ class TestBatchify:
 
     def test_batchify_empty_list(self):
         """Test batchify with empty input."""
-        from heretic.utils import batchify
+        from bruno.utils import batchify
 
         items = []
         batches = batchify(items, 5)
@@ -353,7 +353,7 @@ class TestBatchify:
 
     def test_batchify_batch_size_one(self):
         """Test batchify with batch_size=1."""
-        from heretic.utils import batchify
+        from bruno.utils import batchify
 
         items = [1, 2, 3]
         batches = batchify(items, 1)
@@ -366,7 +366,7 @@ class TestEmptyCache:
 
     def test_empty_cache_cuda(self):
         """Test empty_cache calls CUDA cache clearing."""
-        from heretic.utils import empty_cache
+        from bruno.utils import empty_cache
 
         with (
             patch("heretic.utils.gc.collect") as mock_gc,
@@ -382,7 +382,7 @@ class TestEmptyCache:
 
     def test_empty_cache_xpu(self):
         """Test empty_cache calls XPU cache clearing."""
-        from heretic.utils import empty_cache
+        from bruno.utils import empty_cache
 
         with (
             patch("heretic.utils.gc.collect"),
@@ -396,7 +396,7 @@ class TestEmptyCache:
 
     def test_empty_cache_mps(self):
         """Test empty_cache calls MPS cache clearing."""
-        from heretic.utils import empty_cache
+        from bruno.utils import empty_cache
 
         with (
             patch("heretic.utils.gc.collect"),
@@ -414,7 +414,7 @@ class TestEmptyCache:
 
     def test_empty_cache_no_accelerator(self):
         """Test empty_cache with no accelerator available."""
-        from heretic.utils import empty_cache
+        from bruno.utils import empty_cache
 
         with (
             patch("heretic.utils.gc.collect") as mock_gc,
@@ -436,7 +436,7 @@ class TestGetTrialParameters:
 
     def test_get_trial_parameters_global_direction(self):
         """Test formatting trial parameters with global direction."""
-        from heretic.utils import get_trial_parameters
+        from bruno.utils import get_trial_parameters
 
         mock_trial = MagicMock()
         mock_trial.user_attrs = {
@@ -466,7 +466,7 @@ class TestGetTrialParameters:
 
     def test_get_trial_parameters_per_layer_direction(self):
         """Test formatting trial parameters with per-layer direction."""
-        from heretic.utils import get_trial_parameters
+        from bruno.utils import get_trial_parameters
 
         mock_trial = MagicMock()
         mock_trial.user_attrs = {
@@ -491,7 +491,7 @@ class TestGetReadmeIntro:
 
     def test_get_readme_intro_generates_markdown(self):
         """Test README intro generation."""
-        from heretic.utils import get_readme_intro
+        from bruno.utils import get_readme_intro
 
         mock_settings = MagicMock()
         mock_settings.model = "test-org/test-model"

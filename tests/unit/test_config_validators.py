@@ -9,7 +9,7 @@ Tests the Pydantic validators added to config.py for range validation.
 import pytest
 from pydantic import ValidationError
 
-from heretic.config import LayerRangeProfileConfig, Settings
+from bruno.config import LayerRangeProfileConfig, Settings
 
 
 class TestLayerRangeProfileConfig:

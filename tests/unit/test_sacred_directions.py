@@ -9,8 +9,8 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from heretic.exceptions import SacredDirectionError
-from heretic.model import Model, SacredDirectionResult
+from bruno.exceptions import SacredDirectionError
+from bruno.model import Model, SacredDirectionResult
 
 
 class TestSacredDirectionExtraction:

@@ -8,7 +8,7 @@ Tests that all constants are properly defined and have sensible values.
 
 import pytest
 
-from heretic.constants import (
+from bruno.constants import (
     CACHE_CLEAR_INTERVAL,
     EPSILON,
     LOW_MAGNITUDE_WARNING,

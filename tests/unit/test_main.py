@@ -17,7 +17,7 @@ class TestMainEntryPoint:
 
     def test_main_handles_keyboard_interrupt(self):
         """Test main() catches KeyboardInterrupt gracefully."""
-        from heretic.main import main
+        from bruno.main import main
 
         with patch("heretic.main.install"):
             with patch("heretic.main.run", side_effect=KeyboardInterrupt()):
@@ -30,7 +30,7 @@ class TestMainEntryPoint:
 
     def test_main_handles_keyboard_interrupt_in_context(self):
         """Test main() handles KeyboardInterrupt in __context__."""
-        from heretic.main import main
+        from bruno.main import main
 
         # Create an exception with KeyboardInterrupt as context
         error = RuntimeError("Masked error")
@@ -44,7 +44,7 @@ class TestMainEntryPoint:
 
     def test_main_reraises_other_exceptions(self):
         """Test main() re-raises non-KeyboardInterrupt exceptions."""
-        from heretic.main import main
+        from bruno.main import main
 
         with patch("heretic.main.install"):
             with patch("heretic.main.run", side_effect=ValueError("Test error")):
@@ -59,12 +59,12 @@ class TestRunValidationErrors:
         """Test run() handles pydantic ValidationError gracefully."""
         from pydantic import ValidationError
 
-        from heretic.main import run
+        from bruno.main import run
 
         # Create a real ValidationError by trying to create invalid Settings
         validation_error = None
         try:
-            from heretic.config import Settings
+            from bruno.config import Settings
 
             Settings(model=None)  # This should raise ValidationError
         except ValidationError as e:
@@ -89,7 +89,7 @@ class TestRunGPUDetection:
 
     def test_run_detects_cuda_gpu(self):
         """Test run() prints CUDA GPU type."""
-        from heretic.main import run
+        from bruno.main import run
 
         with (
             patch("heretic.main.Settings") as mock_settings,
@@ -122,7 +122,7 @@ class TestRunGPUDetection:
 
     def test_run_detects_no_gpu(self):
         """Test run() warns when no GPU detected."""
-        from heretic.main import run
+        from bruno.main import run
 
         with (
             patch("heretic.main.Settings") as mock_settings,
@@ -161,7 +161,7 @@ class TestRunBatchSizeDetermination:
 
     def test_run_determines_optimal_batch_size(self):
         """Test batch size auto-determination."""
-        from heretic.main import run
+        from bruno.main import run
 
         with (
             patch("heretic.main.Settings") as mock_settings,

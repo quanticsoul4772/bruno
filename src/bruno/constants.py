@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
-"""Centralized constants for heretic.
+"""Centralized constants for Bruno.
 
 This module contains all magic numbers and thresholds used throughout the codebase.
 Centralizing these values provides:
@@ -11,7 +11,7 @@ Centralizing these values provides:
 - Reduced risk of inconsistent values
 
 Usage:
-    from heretic.constants import Thresholds, LayerPositions, Defaults
+    from bruno.constants import Thresholds, LayerPositions, Defaults
 """
 
 from dataclasses import dataclass

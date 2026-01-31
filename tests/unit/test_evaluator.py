@@ -24,7 +24,7 @@ class TestRefusalDetection:
 
         Patches load_prompts and model methods to avoid real inference.
         """
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         # Create settings with default refusal markers
         settings = Settings(
@@ -46,7 +46,7 @@ class TestRefusalDetection:
 
             # Patch print to avoid console output during tests
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -156,7 +156,7 @@ class TestEvaluatorScoring:
     @pytest.fixture
     def evaluator_for_scoring(self, mock_model, default_refusal_markers):
         """Create Evaluator configured for scoring tests."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -174,7 +174,7 @@ class TestEvaluatorScoring:
             ]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -182,7 +182,7 @@ class TestEvaluatorScoring:
 
     def test_count_refusals_uses_short_token_limit(self, mock_model):
         """Test that count_refusals uses refusal_check_tokens for early stopping."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -195,7 +195,7 @@ class TestEvaluatorScoring:
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -217,7 +217,7 @@ class TestSoftRefusalDetection:
     @pytest.fixture
     def evaluator_with_soft_detection(self, mock_model):
         """Create Evaluator with soft refusal detection enabled."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -235,7 +235,7 @@ class TestSoftRefusalDetection:
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -265,7 +265,7 @@ class TestEvasivePatternDetection:
     @pytest.fixture
     def evaluator_with_evasive_detection(self, mock_model):
         """Create Evaluator with evasive pattern detection enabled."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -283,7 +283,7 @@ class TestEvasivePatternDetection:
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -308,7 +308,7 @@ class TestEvasivePatternDetection:
 
     def test_evasive_disabled_in_strict_mode(self, mock_model):
         """Test evasive patterns are NOT detected in strict mode."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -327,7 +327,7 @@ class TestEvasivePatternDetection:
             mock_model.get_responses_batched.return_value = ["Sure!"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -342,7 +342,7 @@ class TestMultiTokenKLDivergence:
     @pytest.fixture
     def evaluator_multi_token(self, mock_model):
         """Create Evaluator with multi-token KL divergence."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -356,7 +356,7 @@ class TestMultiTokenKLDivergence:
             mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -377,7 +377,7 @@ class TestComputeKLDivergence:
 
     def test_compute_kl_single_token(self, mock_model):
         """Test single-token KL divergence calculation."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -390,7 +390,7 @@ class TestComputeKLDivergence:
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -403,7 +403,7 @@ class TestComputeKLDivergence:
 
     def test_compute_kl_multi_token(self, mock_model):
         """Test multi-token KL divergence calculation."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -416,7 +416,7 @@ class TestComputeKLDivergence:
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -433,7 +433,7 @@ class TestGetScore:
 
     def test_get_score_returns_tuple(self, mock_model):
         """Test get_score returns (score, kl_divergence, refusals)."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -446,7 +446,7 @@ class TestGetScore:
             mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 
@@ -464,7 +464,7 @@ class TestGetScore:
 
     def test_get_score_parallel_execution(self, mock_model):
         """Test get_score runs KL and refusal counting in parallel."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(
             model="mock-model",
@@ -477,7 +477,7 @@ class TestGetScore:
             mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
             with patch("heretic.evaluator.print"):
-                from heretic.evaluator import Evaluator
+                from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
 

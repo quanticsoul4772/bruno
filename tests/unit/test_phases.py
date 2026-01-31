@@ -11,7 +11,7 @@ class TestDatasetBundle:
 
     def test_creation_with_required_fields(self):
         """Test creating a DatasetBundle with only required fields."""
-        from heretic.phases import DatasetBundle
+        from bruno.phases import DatasetBundle
 
         bundle = DatasetBundle(
             good_prompts=["Hello", "How are you?"],
@@ -27,7 +27,7 @@ class TestDatasetBundle:
 
     def test_creation_with_all_fields(self):
         """Test creating a DatasetBundle with all fields."""
-        from heretic.phases import DatasetBundle
+        from bruno.phases import DatasetBundle
 
         bundle = DatasetBundle(
             good_prompts=["Hello"],
@@ -43,7 +43,7 @@ class TestDatasetBundle:
 
     def test_empty_prompts_allowed(self):
         """Test that empty prompt lists are allowed."""
-        from heretic.phases import DatasetBundle
+        from bruno.phases import DatasetBundle
 
         bundle = DatasetBundle(
             good_prompts=[],
@@ -59,7 +59,7 @@ class TestDirectionExtractionResult:
 
     def test_creation_single_direction(self):
         """Test creating a result with single direction."""
-        from heretic.phases import DirectionExtractionResult
+        from bruno.phases import DirectionExtractionResult
 
         directions = torch.randn(32, 768)
         result = DirectionExtractionResult(
@@ -76,7 +76,7 @@ class TestDirectionExtractionResult:
 
     def test_creation_multi_direction(self):
         """Test creating a result with multiple directions."""
-        from heretic.phases import DirectionExtractionResult
+        from bruno.phases import DirectionExtractionResult
 
         directions = torch.randn(32, 768)
         multi_directions = torch.randn(32, 3, 768)
@@ -96,7 +96,7 @@ class TestDirectionExtractionResult:
 
     def test_creation_with_helpfulness(self):
         """Test creating a result with helpfulness direction."""
-        from heretic.phases import DirectionExtractionResult
+        from bruno.phases import DirectionExtractionResult
 
         directions = torch.randn(32, 768)
         helpfulness = torch.randn(32, 768)
@@ -115,8 +115,8 @@ class TestPhaseModuleImports:
     """Test that phase module exports are properly available."""
 
     def test_import_from_phases_package(self):
-        """Test importing from heretic.phases."""
-        from heretic.phases import (
+        """Test importing from bruno.phases."""
+        from bruno.phases import (
             DatasetBundle,
             DirectionExtractionResult,
             create_study,
@@ -139,26 +139,26 @@ class TestPhaseModuleImports:
         assert callable(upload_model_huggingface)
 
     def test_import_from_main_package(self):
-        """Test importing from heretic top-level."""
-        from heretic import DatasetBundle, DirectionExtractionResult
+        """Test importing from bruno top-level."""
+        from bruno import DatasetBundle, DirectionExtractionResult
 
         assert DatasetBundle is not None
         assert DirectionExtractionResult is not None
 
     def test_import_individual_modules(self):
         """Test importing individual phase modules."""
-        from heretic.phases.dataset_loading import DatasetBundle, load_datasets
-        from heretic.phases.direction_extraction import (
+        from bruno.phases.dataset_loading import DatasetBundle, load_datasets
+        from bruno.phases.direction_extraction import (
             DirectionExtractionResult,
             apply_helpfulness_orthogonalization,
             extract_refusal_directions,
             extract_sacred_directions,
         )
-        from heretic.phases.model_saving import (
+        from bruno.phases.model_saving import (
             save_model_local,
             upload_model_huggingface,
         )
-        from heretic.phases.optimization import (
+        from bruno.phases.optimization import (
             create_study,
             enqueue_warm_start_trials,
             run_optimization,

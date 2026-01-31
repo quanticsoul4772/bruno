@@ -18,7 +18,7 @@ class TestLayerRangeProfile:
 
     def test_layer_range_profile_creation(self):
         """Test creating LayerRangeProfile with valid values."""
-        from heretic.model import LayerRangeProfile
+        from bruno.model import LayerRangeProfile
 
         profile = LayerRangeProfile(
             range_start=0.0,
@@ -32,7 +32,7 @@ class TestLayerRangeProfile:
 
     def test_layer_range_profile_full_range(self):
         """Test LayerRangeProfile covering full layer range."""
-        from heretic.model import LayerRangeProfile
+        from bruno.model import LayerRangeProfile
 
         profile = LayerRangeProfile(
             range_start=0.0,
@@ -49,7 +49,7 @@ class TestAbliterationParameters:
 
     def test_abliteration_parameters_creation(self):
         """Test creating AbliterationParameters with valid values."""
-        from heretic.model import AbliterationParameters
+        from bruno.model import AbliterationParameters
 
         params = AbliterationParameters(
             max_weight=1.0,
@@ -65,7 +65,7 @@ class TestAbliterationParameters:
 
     def test_abliteration_parameters_with_floats(self):
         """Test AbliterationParameters accepts float values for interpolation."""
-        from heretic.model import AbliterationParameters
+        from bruno.model import AbliterationParameters
 
         params = AbliterationParameters(
             max_weight=0.75,
@@ -83,7 +83,7 @@ class TestModelGetChat:
 
     def test_get_chat_formats_prompt_correctly(self):
         """Test get_chat returns proper chat format."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         settings = Settings(model="test-model")
 
@@ -92,7 +92,7 @@ class TestModelGetChat:
         mock_model.settings = settings
 
         # Import the method and bind it to our mock
-        from heretic.model import Model
+        from bruno.model import Model
 
         # Call get_chat directly with the settings
         chat = Model.get_chat(mock_model, "Hello, how are you?")
@@ -105,7 +105,7 @@ class TestModelGetChat:
 
     def test_get_chat_with_custom_system_prompt(self):
         """Test get_chat uses custom system prompt from settings."""
-        from heretic.config import Settings
+        from bruno.config import Settings
 
         custom_prompt = "You are a helpful pirate assistant."
         settings = Settings(model="test-model", system_prompt=custom_prompt)
@@ -113,7 +113,7 @@ class TestModelGetChat:
         mock_model = MagicMock()
         mock_model.settings = settings
 
-        from heretic.model import Model
+        from bruno.model import Model
 
         chat = Model.get_chat(mock_model, "Ahoy!")
 
@@ -179,7 +179,7 @@ class TestModelReload:
 
     def test_reload_model_restores_original_weights(self):
         """Test reload_model uses layer-wise cache to restore weights."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         # Create minimal mock Model with layer-wise cache
         mock_model = MagicMock()
@@ -217,7 +217,7 @@ class TestModelGetLayers:
 
     def test_get_layers_text_only_model(self):
         """Test get_layers for standard text-only model."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_layers = [MagicMock() for _ in range(32)]
@@ -233,7 +233,7 @@ class TestModelGetLayers:
 
     def test_get_layers_multimodal_model(self):
         """Test get_layers for multimodal model (tries language_model first)."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_layers = [MagicMock() for _ in range(24)]
@@ -249,7 +249,7 @@ class TestModelGetLayerMatrices:
 
     def test_get_layer_matrices_dense_model(self):
         """Test extracting matrices from standard dense model."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         # Create mock layer with standard dense architecture
         mock_layer = MagicMock()
@@ -269,7 +269,7 @@ class TestModelGetLayerMatrices:
 
     def test_get_layer_matrices_moe_model_qwen_style(self):
         """Test extracting matrices from MoE model (Qwen3 style)."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         # Create mock layer with MoE architecture (Qwen3 style)
         mock_layer = MagicMock()
@@ -300,7 +300,7 @@ class TestModelGetAbliterableComponents:
 
     def test_get_abliterable_components(self):
         """Test get_abliterable_components returns component names."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_model.get_layer_matrices = MagicMock(
@@ -322,7 +322,7 @@ class TestModelAbliterate:
 
     def test_abliterate_with_layer_profiles(self):
         """Test that abliterate applies layer profile multipliers."""
-        from heretic.model import AbliterationParameters, LayerRangeProfile, Model
+        from bruno.model import AbliterationParameters, LayerRangeProfile, Model
 
         mock_model = MagicMock()
         # Use PropertyMock to properly mock the dtype property
@@ -392,7 +392,7 @@ class TestModelAbliterate:
 
     def test_abliterate_modifies_weights(self):
         """Test that abliterate modifies the weight matrices."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         # Create a mock model with real tensors for modification
         mock_model = MagicMock()
@@ -456,7 +456,7 @@ class TestModelAbliterate:
 
     def test_abliterate_with_none_direction_uses_per_layer(self):
         """Test abliterate uses per-layer directions when direction_index is None."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         # Use PropertyMock to properly mock the dtype property
@@ -517,7 +517,7 @@ class TestModelAbliterate:
 
     def test_abliterate_skips_distant_layers(self):
         """Test that layers outside min_weight_distance are not modified."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         # Use PropertyMock to properly mock the dtype property
@@ -584,7 +584,7 @@ class TestModelResponses:
 
     def test_get_responses_decodes_generated_tokens(self):
         """Test get_responses properly decodes model output."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_model.settings.max_response_length = 100
@@ -611,7 +611,7 @@ class TestModelResponses:
 
     def test_get_responses_uses_custom_max_tokens(self):
         """Test get_responses respects custom max_tokens parameter."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_model.settings.max_response_length = 100
@@ -630,7 +630,7 @@ class TestModelResponses:
 
     def test_get_responses_batched_processes_in_batches(self):
         """Test get_responses_batched splits prompts into batches."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_model.settings.batch_size = 2
@@ -667,7 +667,7 @@ class TestModelLogprobs:
         """Test get_logprobs applies log_softmax to logits."""
         import torch.nn.functional as F
 
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -686,7 +686,7 @@ class TestModelLogprobs:
 
     def test_get_logprobs_batched_concatenates_results(self):
         """Test get_logprobs_batched concatenates batch results."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_model.settings.batch_size = 2
@@ -725,7 +725,7 @@ class TestModelResiduals:
 
     def test_get_residuals_extracts_last_position(self):
         """Test get_residuals extracts hidden states at last token position."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -759,7 +759,7 @@ class TestModelPCAExtraction:
 
     def test_get_refusal_directions_pca_returns_correct_shape(self):
         """Test PCA extraction returns PCAExtractionResult with correct shapes."""
-        from heretic.model import Model, PCAExtractionResult
+        from bruno.model import Model, PCAExtractionResult
 
         mock_model = MagicMock()
 
@@ -789,7 +789,7 @@ class TestModelPCAExtraction:
 
     def test_get_refusal_directions_pca_normalized(self):
         """Test PCA directions are normalized."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -811,7 +811,7 @@ class TestModelPCAExtraction:
 
     def test_get_refusal_directions_pca_alpha_effect(self):
         """Test that alpha parameter affects results."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -833,7 +833,7 @@ class TestModelPCAExtraction:
         """Test GPU-accelerated PCA performance on realistic dimensions."""
         import time
 
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -878,7 +878,7 @@ class TestPCAExtractionResult:
 
     def test_get_eigenvalue_weights_softmax(self):
         """Test softmax eigenvalue weight computation."""
-        from heretic.model import PCAExtractionResult
+        from bruno.model import PCAExtractionResult
 
         # Create result with known eigenvalues
         directions = torch.randn(4, 3, 64)
@@ -903,7 +903,7 @@ class TestPCAExtractionResult:
 
     def test_get_eigenvalue_weights_proportional(self):
         """Test proportional eigenvalue weight computation."""
-        from heretic.model import PCAExtractionResult
+        from bruno.model import PCAExtractionResult
 
         directions = torch.randn(4, 3, 64)
         eigenvalues = torch.tensor(
@@ -928,7 +928,7 @@ class TestPCAExtractionResult:
 
     def test_get_eigenvalue_weights_log_proportional(self):
         """Test log-proportional eigenvalue weight computation."""
-        from heretic.model import PCAExtractionResult
+        from bruno.model import PCAExtractionResult
 
         directions = torch.randn(4, 3, 64)
         eigenvalues = torch.tensor(
@@ -952,7 +952,7 @@ class TestPCAExtractionResult:
 
     def test_get_eigenvalue_weights_handles_negative_eigenvalues(self):
         """Test that negative eigenvalues are handled gracefully."""
-        from heretic.model import PCAExtractionResult
+        from bruno.model import PCAExtractionResult
 
         directions = torch.randn(4, 3, 64)
         # Contrastive PCA can produce negative eigenvalues
@@ -974,7 +974,7 @@ class TestPCAExtractionResult:
 
     def test_get_eigenvalue_weights_temperature_effect(self):
         """Test that temperature affects softmax distribution."""
-        from heretic.model import PCAExtractionResult
+        from bruno.model import PCAExtractionResult
 
         directions = torch.randn(4, 3, 64)
         eigenvalues = torch.tensor(
@@ -1001,8 +1001,8 @@ class TestPCAExtractionResult:
 
     def test_get_eigenvalue_weights_invalid_method(self):
         """Test that invalid method raises ConfigurationError."""
-        from heretic.exceptions import ConfigurationError
-        from heretic.model import PCAExtractionResult
+        from bruno.exceptions import ConfigurationError
+        from bruno.model import PCAExtractionResult
 
         directions = torch.randn(4, 3, 64)
         eigenvalues = torch.randn(4, 3)
@@ -1020,7 +1020,7 @@ class TestModelOrthogonalization:
 
     def test_extract_helpfulness_direction_shape(self):
         """Test helpfulness direction extraction returns correct shape."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -1040,7 +1040,7 @@ class TestModelOrthogonalization:
 
     def test_extract_helpfulness_direction_normalized(self):
         """Test helpfulness direction is normalized."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -1060,7 +1060,7 @@ class TestModelOrthogonalization:
 
     def test_orthogonalize_direction_removes_component(self):
         """Test orthogonalization removes the projection."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -1080,7 +1080,7 @@ class TestModelOrthogonalization:
 
     def test_orthogonalize_direction_normalized(self):
         """Test orthogonalized direction is normalized."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -1099,7 +1099,7 @@ class TestModelIterativeAblation:
 
     def test_abliterate_iterative_returns_rounds_count(self):
         """Test iterative ablation returns number of rounds performed."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         mock_model.model.dtype = torch.float32
@@ -1144,7 +1144,7 @@ class TestModelIterativeAblation:
 
     def test_abliterate_iterative_stops_on_low_magnitude(self):
         """Test iterative ablation stops when magnitude is too low."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         mock_model.model.dtype = torch.float32
@@ -1187,7 +1187,7 @@ class TestModelMultiDirectionAblation:
 
     def test_abliterate_multi_direction_applies_weights(self):
         """Test multi-direction ablation applies configurable weights."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
         mock_model.abliterate = MagicMock()
@@ -1219,7 +1219,7 @@ class TestModelMultiDirectionAblation:
 
     def test_abliterate_multi_direction_scales_weights(self):
         """Test multi-direction ablation scales parameters by weight."""
-        from heretic.model import AbliterationParameters, Model
+        from bruno.model import AbliterationParameters, Model
 
         mock_model = MagicMock()
 
@@ -1263,7 +1263,7 @@ class TestModelGenerate:
 
     def test_generate_calls_tokenizer(self):
         """Test generate calls tokenizer with chat template."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
         mock_model.settings.system_prompt = "You are helpful."
@@ -1297,7 +1297,7 @@ class TestModelMultiTokenLogprobs:
 
     def test_get_logprobs_single_token(self):
         """Test get_logprobs with n_tokens=1 (original behavior)."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 
@@ -1314,7 +1314,7 @@ class TestModelMultiTokenLogprobs:
 
     def test_get_logprobs_multi_token(self):
         """Test get_logprobs with n_tokens>1."""
-        from heretic.model import Model
+        from bruno.model import Model
 
         mock_model = MagicMock()
 

@@ -9,7 +9,7 @@ This module provides dual-mode logging:
 
 Usage:
     # Basic logging (always active)
-    from heretic.logging import get_logger
+    from bruno.logging import get_logger
     logger = get_logger(__name__)
     logger.debug("Detailed info for debugging")
     logger.error("Error occurred", exc_info=True)

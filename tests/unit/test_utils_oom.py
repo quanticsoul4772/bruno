@@ -13,13 +13,13 @@ class TestBatchSizeError:
 
     def test_batch_size_error_is_exception(self):
         """Test BatchSizeError inherits from Exception."""
-        from heretic.utils import BatchSizeError
+        from bruno.utils import BatchSizeError
 
         assert issubclass(BatchSizeError, Exception)
 
     def test_batch_size_error_message(self):
         """Test BatchSizeError can be raised with message."""
-        from heretic.utils import BatchSizeError
+        from bruno.utils import BatchSizeError
 
         with pytest.raises(BatchSizeError, match="out of memory"):
             raise BatchSizeError("out of memory")
@@ -31,7 +31,7 @@ class TestGPUMemoryInfo:
     def test_get_gpu_memory_info_no_cuda(self):
         """Test returns zeros when CUDA not available."""
         with patch("heretic.utils.torch.cuda.is_available", return_value=False):
-            from heretic.utils import get_gpu_memory_info
+            from bruno.utils import get_gpu_memory_info
 
             info = get_gpu_memory_info()
 
@@ -58,7 +58,7 @@ class TestGPUMemoryInfo:
                 "heretic.utils.torch.cuda.memory_allocated", return_value=1_500_000_000
             ),
         ):
-            from heretic.utils import get_gpu_memory_info
+            from bruno.utils import get_gpu_memory_info
 
             info = get_gpu_memory_info()
 
@@ -76,7 +76,7 @@ class TestGPUMemoryInfo:
                 side_effect=RuntimeError("GPU error"),
             ),
         ):
-            from heretic.utils import get_gpu_memory_info
+            from bruno.utils import get_gpu_memory_info
 
             info = get_gpu_memory_info()
 

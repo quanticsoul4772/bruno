@@ -2,7 +2,7 @@
 
 import pytest
 
-from heretic.exceptions import (
+from bruno.exceptions import (
     AbliterationError,
     CircuitAblationError,
     CloudError,

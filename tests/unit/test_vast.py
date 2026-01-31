@@ -19,7 +19,7 @@ class TestAPIKeyValidation:
 
     def test_validate_api_key_valid_alphanumeric(self):
         """Test valid alphanumeric API keys are accepted."""
-        from heretic.vast import validate_api_key
+        from bruno.vast import validate_api_key
 
         # Should not raise
         assert validate_api_key("abc123DEF456") is True
@@ -28,7 +28,7 @@ class TestAPIKeyValidation:
 
     def test_validate_api_key_valid_with_hyphens_underscores(self):
         """Test valid API keys with hyphens and underscores are accepted."""
-        from heretic.vast import validate_api_key
+        from bruno.vast import validate_api_key
 
         assert validate_api_key("abc123-DEF_456") is True
         assert validate_api_key("test-api-key") is True
@@ -37,48 +37,48 @@ class TestAPIKeyValidation:
 
     def test_validate_api_key_empty_allowed(self):
         """Test empty API key is allowed (fails later with clear message)."""
-        from heretic.vast import validate_api_key
+        from bruno.vast import validate_api_key
 
         assert validate_api_key("") is True
 
     def test_validate_api_key_rejects_semicolon(self):
         """Test semicolon injection is blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key; rm -rf /")
 
     def test_validate_api_key_rejects_backticks(self):
         """Test backtick injection is blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key`whoami`")
 
     def test_validate_api_key_rejects_dollar_sign(self):
         """Test dollar sign variable expansion is blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key$HOME")
 
     def test_validate_api_key_rejects_pipe(self):
         """Test pipe command chaining is blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key|cat /etc/passwd")
 
     def test_validate_api_key_rejects_ampersand(self):
         """Test ampersand background execution is blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key&whoami")
 
     def test_validate_api_key_rejects_quotes(self):
         """Test quotes are blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key'injection")
@@ -88,14 +88,14 @@ class TestAPIKeyValidation:
 
     def test_validate_api_key_rejects_newlines(self):
         """Test newline injection is blocked."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key\nwhoami")
 
     def test_validate_api_key_rejects_spaces(self):
         """Test spaces are blocked (could break command parsing)."""
-        from heretic.vast import APIKeyValidationError, validate_api_key
+        from bruno.vast import APIKeyValidationError, validate_api_key
 
         with pytest.raises(APIKeyValidationError, match="invalid characters"):
             validate_api_key("key with spaces")
@@ -106,7 +106,7 @@ class TestVastConfig:
 
     def test_vast_config_defaults(self):
         """Test VastConfig default values."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         config = VastConfig(api_key="test-key")
 
@@ -118,7 +118,7 @@ class TestVastConfig:
 
     def test_vast_config_custom_values(self):
         """Test VastConfig with custom values."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         config = VastConfig(
             api_key="my-api-key",
@@ -136,7 +136,7 @@ class TestVastConfig:
 
     def test_vast_config_from_env_with_env_vars(self):
         """Test VastConfig.from_env loads from environment variables."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         with patch.dict(
             "os.environ",
@@ -154,7 +154,7 @@ class TestVastConfig:
 
     def test_vast_config_from_env_with_dotenv_file(self):
         """Test VastConfig.from_env reads .env file."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         env_content = """
 # Comment line
@@ -173,7 +173,7 @@ PLACEHOLDER_VAR=your_api_key_here
 
     def test_vast_config_from_env_empty_api_key(self):
         """Test VastConfig.from_env handles empty API key."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         with patch.dict("os.environ", {}, clear=True):
             with patch("pathlib.Path.exists", return_value=False):
@@ -183,7 +183,7 @@ PLACEHOLDER_VAR=your_api_key_here
 
     def test_vast_config_from_env_validates_api_key(self):
         """Test VastConfig.from_env validates API key for injection attacks."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         with patch.dict("os.environ", {"VAST_API_KEY": "valid-key_123"}, clear=True):
             with patch("pathlib.Path.exists", return_value=False):
@@ -192,7 +192,7 @@ PLACEHOLDER_VAR=your_api_key_here
 
     def test_vast_config_from_env_rejects_malicious_api_key(self):
         """Test VastConfig.from_env rejects API key with shell metacharacters."""
-        from heretic.vast import APIKeyValidationError, VastConfig
+        from bruno.vast import APIKeyValidationError, VastConfig
 
         with patch.dict("os.environ", {"VAST_API_KEY": "key; rm -rf /"}, clear=True):
             with patch("pathlib.Path.exists", return_value=False):
@@ -205,7 +205,7 @@ class TestGPUTiers:
 
     def test_gpu_tiers_contains_expected_tiers(self):
         """Test GPU_TIERS has all expected tier configurations."""
-        from heretic.vast import GPU_TIERS
+        from bruno.vast import GPU_TIERS
 
         expected_tiers = [
             "RTX_4090",
@@ -221,7 +221,7 @@ class TestGPUTiers:
 
     def test_gpu_tiers_have_required_fields(self):
         """Test each GPU tier has all required configuration fields."""
-        from heretic.vast import GPU_TIERS
+        from bruno.vast import GPU_TIERS
 
         required_fields = [
             "gpu_name",
@@ -237,7 +237,7 @@ class TestGPUTiers:
 
     def test_gpu_tiers_vram_ordering(self):
         """Test GPU tiers are ordered by VRAM (generally)."""
-        from heretic.vast import GPU_TIERS
+        from bruno.vast import GPU_TIERS
 
         # RTX_4090 should have 24GB
         assert GPU_TIERS["RTX_4090"]["min_vram"] == 24
@@ -251,7 +251,7 @@ class TestGPUTiers:
 
     def test_gpu_tiers_price_ordering(self):
         """Test higher tier GPUs have higher max prices."""
-        from heretic.vast import GPU_TIERS
+        from bruno.vast import GPU_TIERS
 
         assert GPU_TIERS["RTX_4090"]["max_price"] < GPU_TIERS["A100_80GB"]["max_price"]
         assert GPU_TIERS["A100_80GB"]["max_price"] < GPU_TIERS["H100"]["max_price"]
@@ -262,7 +262,7 @@ class TestFindVastaiCLI:
 
     def test_find_vastai_cli_local_exe(self):
         """Test finding vast.exe in current directory."""
-        from heretic.vast import find_vastai_cli
+        from bruno.vast import find_vastai_cli
 
         with patch("pathlib.Path.exists") as mock_exists:
             # First path check (vast.exe in current dir) returns True
@@ -275,7 +275,7 @@ class TestFindVastaiCLI:
 
     def test_find_vastai_cli_in_path(self):
         """Test finding vastai in system PATH."""
-        from heretic.vast import find_vastai_cli
+        from bruno.vast import find_vastai_cli
 
         with patch("pathlib.Path.exists", return_value=False):
             with patch("shutil.which") as mock_which:
@@ -289,7 +289,7 @@ class TestFindVastaiCLI:
 
     def test_find_vastai_cli_vast_in_path(self):
         """Test finding 'vast' command in PATH."""
-        from heretic.vast import find_vastai_cli
+        from bruno.vast import find_vastai_cli
 
         with patch("pathlib.Path.exists", return_value=False):
             with patch("shutil.which") as mock_which:
@@ -304,7 +304,7 @@ class TestFindVastaiCLI:
 
     def test_find_vastai_cli_fallback(self):
         """Test fallback when CLI not found."""
-        from heretic.vast import find_vastai_cli
+        from bruno.vast import find_vastai_cli
 
         with patch("pathlib.Path.exists", return_value=False):
             with patch("shutil.which", return_value=None):
@@ -320,7 +320,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_success(self):
         """Test successful CLI command execution."""
-        from heretic.vast import VastConfig, run_vastai_cmd
+        from bruno.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="test-key")
 
@@ -340,7 +340,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_with_api_key(self):
         """Test API key is passed via environment."""
-        from heretic.vast import VastConfig, run_vastai_cmd
+        from bruno.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="secret-key")
 
@@ -356,7 +356,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_missing_api_key(self):
         """Test error when API key is missing."""
-        from heretic.vast import VastConfig, run_vastai_cmd
+        from bruno.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="")
 
@@ -368,7 +368,7 @@ class TestRunVastaiCmd:
 
     def test_run_vastai_cmd_cli_not_found(self):
         """Test error when CLI executable not found."""
-        from heretic.vast import VastConfig, run_vastai_cmd
+        from bruno.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="test-key")
 
@@ -383,7 +383,7 @@ class TestRunVastaiCmd:
         """Test timeout handling."""
         import subprocess
 
-        from heretic.vast import VastConfig, run_vastai_cmd
+        from bruno.vast import VastConfig, run_vastai_cmd
 
         config = VastConfig(api_key="test-key")
 
@@ -402,7 +402,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_ssh_url_format(self):
         """Test parsing ssh://user@host:port format."""
-        from heretic.vast import VastConfig, get_ssh_info
+        from bruno.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -415,7 +415,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_ssh_p_format_ip(self):
         """Test parsing 'ssh -p PORT user@IP' format."""
-        from heretic.vast import VastConfig, get_ssh_info
+        from bruno.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -428,7 +428,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_ssh_p_format_hostname(self):
         """Test parsing 'ssh -p PORT user@hostname' format."""
-        from heretic.vast import VastConfig, get_ssh_info
+        from bruno.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -441,7 +441,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_user_host_port_format(self):
         """Test parsing user@host:port format (without ssh://)."""
-        from heretic.vast import VastConfig, get_ssh_info
+        from bruno.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -454,7 +454,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_command_failure(self):
         """Test handling of failed ssh-url command."""
-        from heretic.vast import VastConfig, get_ssh_info
+        from bruno.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -467,7 +467,7 @@ class TestGetSSHInfo:
 
     def test_get_ssh_info_unparseable_output(self):
         """Test handling of unparseable SSH URL output."""
-        from heretic.vast import VastConfig, get_ssh_info
+        from bruno.vast import VastConfig, get_ssh_info
 
         config = VastConfig(api_key="test-key")
 
@@ -484,7 +484,7 @@ class TestGetInstances:
 
     def test_get_instances_success(self):
         """Test successful instance listing."""
-        from heretic.vast import VastConfig, get_instances
+        from bruno.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -506,7 +506,7 @@ class TestGetInstances:
 
     def test_get_instances_empty(self):
         """Test empty instance list."""
-        from heretic.vast import VastConfig, get_instances
+        from bruno.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -519,7 +519,7 @@ class TestGetInstances:
 
     def test_get_instances_api_error(self):
         """Test handling of API errors."""
-        from heretic.vast import VastConfig, get_instances
+        from bruno.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -532,7 +532,7 @@ class TestGetInstances:
 
     def test_get_instances_invalid_json(self):
         """Test handling of invalid JSON response."""
-        from heretic.vast import VastConfig, get_instances
+        from bruno.vast import VastConfig, get_instances
 
         config = VastConfig(api_key="test-key")
 
@@ -549,7 +549,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_finds_running(self):
         """Test finding first running instance."""
-        from heretic.vast import VastConfig, get_running_instance
+        from bruno.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -567,7 +567,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_with_status_field(self):
         """Test finding instance using 'status' field instead of 'actual_status'."""
-        from heretic.vast import VastConfig, get_running_instance
+        from bruno.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -582,7 +582,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_none_running(self):
         """Test returning first instance when none running."""
-        from heretic.vast import VastConfig, get_running_instance
+        from bruno.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -599,7 +599,7 @@ class TestGetRunningInstance:
 
     def test_get_running_instance_empty_list(self):
         """Test handling empty instance list."""
-        from heretic.vast import VastConfig, get_running_instance
+        from bruno.vast import VastConfig, get_running_instance
 
         config = VastConfig(api_key="test-key")
 
@@ -617,20 +617,20 @@ class TestConstants:
 
     def test_default_image(self):
         """Test DEFAULT_IMAGE is a valid Docker image."""
-        from heretic.vast import DEFAULT_IMAGE
+        from bruno.vast import DEFAULT_IMAGE
 
         assert "pytorch" in DEFAULT_IMAGE
         assert "cuda" in DEFAULT_IMAGE
 
     def test_min_download_speed(self):
         """Test MIN_DOWNLOAD_SPEED is reasonable."""
-        from heretic.vast import MIN_DOWNLOAD_SPEED
+        from bruno.vast import MIN_DOWNLOAD_SPEED
 
         assert MIN_DOWNLOAD_SPEED >= 100  # At least 100 Mbps
 
     def test_models_dir(self):
         """Test MODELS_DIR path."""
-        from heretic.vast import MODELS_DIR
+        from bruno.vast import MODELS_DIR
 
         assert MODELS_DIR.startswith("/workspace")
 
@@ -640,13 +640,13 @@ class TestGetConnection:
 
     def test_get_connection_fabric_not_available(self):
         """Test handling when fabric is not installed."""
-        from heretic.vast import VastConfig
+        from bruno.vast import VastConfig
 
         config = VastConfig(api_key="test-key")
 
         with patch("heretic.vast.FABRIC_AVAILABLE", False):
             with patch("heretic.vast.console.print"):  # Suppress output
-                from heretic.vast import get_connection
+                from bruno.vast import get_connection
 
                 result = get_connection("12345", config)
 
@@ -654,7 +654,7 @@ class TestGetConnection:
 
     def test_get_connection_no_ssh_info(self):
         """Test handling when SSH info cannot be retrieved."""
-        from heretic.vast import VastConfig, get_connection
+        from bruno.vast import VastConfig, get_connection
 
         config = VastConfig(api_key="test-key")
 
@@ -667,7 +667,7 @@ class TestGetConnection:
 
     def test_get_connection_success(self):
         """Test successful connection creation."""
-        from heretic.vast import VastConfig, get_connection
+        from bruno.vast import VastConfig, get_connection
 
         config = VastConfig(api_key="test-key")
 
@@ -701,7 +701,7 @@ class TestRunSSHCommand:
 
     def test_run_ssh_command_success(self):
         """Test successful SSH command execution."""
-        from heretic.vast import run_ssh_command
+        from bruno.vast import run_ssh_command
 
         mock_conn = MagicMock()
         mock_result = MagicMock()
@@ -721,7 +721,7 @@ class TestRunSSHCommand:
 
     def test_run_ssh_command_failure(self):
         """Test handling of failed SSH command."""
-        from heretic.vast import run_ssh_command
+        from bruno.vast import run_ssh_command
 
         mock_conn = MagicMock()
         mock_result = MagicMock()
@@ -734,7 +734,7 @@ class TestRunSSHCommand:
 
     def test_run_ssh_command_connection_error(self):
         """Test handling of connection errors (OSError, TimeoutError, EOFError)."""
-        from heretic.vast import run_ssh_command
+        from bruno.vast import run_ssh_command
 
         # Test OSError (covers socket errors)
         mock_conn = MagicMock()

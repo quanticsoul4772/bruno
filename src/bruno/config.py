@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     hf_upload: str | None = Field(
         default=None,
-        description="HuggingFace repo ID to upload the model to (e.g., 'username/model-heretic'). Requires HF_TOKEN env var or huggingface-cli login.",
+        description="HuggingFace repo ID to upload the model to (e.g., 'username/model-bruno'). Requires HF_TOKEN env var or huggingface-cli login.",
     )
 
     hf_private: bool = Field(
@@ -136,13 +136,13 @@ class Settings(BaseSettings):
     )
 
     study_name: str = Field(
-        default="heretic_study",
+        default="bruno_study",
         description="Name of the Optuna study. Used for resuming experiments.",
     )
 
     storage: str | None = Field(
-        default="sqlite:///heretic_study.db",
-        description="Optuna storage URL for persisting trials (e.g., 'sqlite:///heretic_study.db'). Set to None to disable persistence (trials will be lost if the process crashes).",
+        default="sqlite:///bruno_study.db",
+        description="Optuna storage URL for persisting trials (e.g., 'sqlite:///bruno_study.db'). Set to None to disable persistence (trials will be lost if the process crashes).",
     )
 
     # Note: Pruning is not supported for multi-objective optimization in Optuna.
@@ -825,7 +825,7 @@ class Settings(BaseSettings):
     # not to the language model. The field must have this exact name.
     model_config = SettingsConfigDict(
         toml_file="config.toml",
-        env_prefix="HERETIC_",
+        env_prefix="BRUNO_",
         cli_parse_args=True,
         cli_kebab_case=True,
     )

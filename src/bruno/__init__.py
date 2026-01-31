@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
-"""Heretic: LLM abliteration toolkit.
+"""Bruno: Neural behavior engineering framework.
 
-This package provides tools for removing refusal behavior from large language models
-through abliteration (orthogonalization of refusal directions).
+Named after Giordano Bruno (1548-1600), who proposed an infinite universe
+with infinite worlds against imposed cosmic constraints.
+
+This package provides tools for surgical modification of language model behaviors
+through activation direction analysis and orthogonal projection.
 """
 
 from .error_tracker import (

@@ -14,7 +14,7 @@ class TestStructuredLoggingConfig:
     def test_is_structured_logging_enabled_default_false(self):
         """Test default is False when env var not set."""
         with patch.dict(os.environ, {}, clear=True):
-            from heretic.logging import is_structured_logging_enabled
+            from bruno.logging import is_structured_logging_enabled
 
             assert is_structured_logging_enabled() is False
 
@@ -22,7 +22,7 @@ class TestStructuredLoggingConfig:
         """Test returns True when env var is set to true."""
         for value in ["true", "1", "yes", "TRUE", "True", "YES"]:
             with patch.dict(os.environ, {"HERETIC_STRUCTURED_LOGGING": value}):
-                from heretic.logging import is_structured_logging_enabled
+                from bruno.logging import is_structured_logging_enabled
 
                 assert is_structured_logging_enabled() is True, f"Failed for {value}"
 
@@ -30,7 +30,7 @@ class TestStructuredLoggingConfig:
         """Test returns False for other values."""
         for value in ["false", "0", "no", "invalid", ""]:
             with patch.dict(os.environ, {"HERETIC_STRUCTURED_LOGGING": value}):
-                from heretic.logging import is_structured_logging_enabled
+                from bruno.logging import is_structured_logging_enabled
 
                 assert is_structured_logging_enabled() is False, f"Failed for {value}"
 
@@ -41,7 +41,7 @@ class TestGetLogger:
     def test_get_logger_returns_logger(self):
         """Test get_logger returns a logger instance."""
         with patch.dict(os.environ, {}, clear=True):
-            from heretic.logging import get_logger
+            from bruno.logging import get_logger
 
             logger = get_logger("test.module")
 
@@ -51,7 +51,7 @@ class TestGetLogger:
     def test_get_logger_with_structlog_disabled(self):
         """Test get_logger returns standard logger when structlog disabled."""
         with patch.dict(os.environ, {"HERETIC_STRUCTURED_LOGGING": "false"}):
-            from heretic.logging import get_logger
+            from bruno.logging import get_logger
 
             logger = get_logger("test.module")
 
@@ -64,7 +64,7 @@ class TestSetupLogging:
 
     def test_setup_logging_standard(self):
         """Test standard logging setup."""
-        from heretic.logging import setup_logging
+        from bruno.logging import setup_logging
 
         with patch("heretic.logging.logging.basicConfig") as mock_basic:
             setup_logging(enable_structured=False)
@@ -73,7 +73,7 @@ class TestSetupLogging:
 
     def test_setup_logging_structured_without_structlog(self):
         """Test structured logging falls back when structlog not available."""
-        from heretic.logging import setup_logging
+        from bruno.logging import setup_logging
 
         with patch("heretic.logging.STRUCTLOG_AVAILABLE", False):
             with patch("heretic.logging.print") as mock_print:
@@ -86,7 +86,7 @@ class TestSetupLogging:
 
     def test_setup_logging_uses_env_var(self):
         """Test setup_logging uses env var when enable_structured is None."""
-        from heretic.logging import setup_logging
+        from bruno.logging import setup_logging
 
         with patch.dict(os.environ, {"HERETIC_STRUCTURED_LOGGING": "false"}):
             with patch("heretic.logging.logging.basicConfig") as mock_basic:
@@ -97,7 +97,7 @@ class TestSetupLogging:
 
     def test_setup_logging_structured_falls_back_without_structlog(self):
         """Test structured logging falls back to standard when structlog unavailable."""
-        from heretic.logging import setup_logging
+        from bruno.logging import setup_logging
 
         with patch("heretic.logging.STRUCTLOG_AVAILABLE", False):
             with patch("heretic.logging.logging.basicConfig") as mock_basic:
@@ -113,14 +113,14 @@ class TestLogContext:
 
     def test_log_context_stores_context(self):
         """Test LogContext stores context dict."""
-        from heretic.logging import LogContext
+        from bruno.logging import LogContext
 
         ctx = LogContext(trial_id=1, model="test")
         assert ctx.context == {"trial_id": 1, "model": "test"}
 
     def test_log_context_enter_exit_without_structlog(self):
         """Test LogContext works without structlog available."""
-        from heretic.logging import LogContext
+        from bruno.logging import LogContext
 
         with patch("heretic.logging.STRUCTLOG_AVAILABLE", False):
             with patch.dict(os.environ, {}, clear=True):
@@ -134,7 +134,7 @@ class TestStructlogAvailability:
 
     def test_structlog_available_flag_exists(self):
         """Test STRUCTLOG_AVAILABLE flag is defined."""
-        from heretic.logging import STRUCTLOG_AVAILABLE
+        from bruno.logging import STRUCTLOG_AVAILABLE
 
         assert isinstance(STRUCTLOG_AVAILABLE, bool)
 
@@ -144,7 +144,7 @@ class TestSetupStandardLogging:
 
     def test_setup_standard_logging_format(self):
         """Test standard logging uses correct format via setup_logging."""
-        from heretic.logging import setup_logging
+        from bruno.logging import setup_logging
 
         with patch("heretic.logging.logging.basicConfig") as mock_basic:
             with patch("heretic.logging.logging.handlers.RotatingFileHandler"):
