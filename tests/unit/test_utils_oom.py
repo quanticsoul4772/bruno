@@ -51,9 +51,7 @@ class TestGPUMemoryInfo:
                 "bruno.utils.torch.cuda.get_device_properties",
                 return_value=mock_props,
             ),
-            patch(
-                "bruno.utils.torch.cuda.memory_reserved", return_value=2_000_000_000
-            ),
+            patch("bruno.utils.torch.cuda.memory_reserved", return_value=2_000_000_000),
             patch(
                 "bruno.utils.torch.cuda.memory_allocated", return_value=1_500_000_000
             ),

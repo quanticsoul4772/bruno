@@ -94,9 +94,7 @@ class TestRunGPUDetection:
         with (
             patch("bruno.main.Settings") as mock_settings,
             patch("bruno.main.torch.cuda.is_available", return_value=True),
-            patch(
-                "bruno.main.torch.cuda.get_device_name", return_value="NVIDIA A100"
-            ),
+            patch("bruno.main.torch.cuda.get_device_name", return_value="NVIDIA A100"),
             patch("bruno.main.print") as mock_print,
             patch("bruno.main.Model") as mock_model_class,
         ):
@@ -166,9 +164,7 @@ class TestRunBatchSizeDetermination:
         with (
             patch("bruno.main.Settings") as mock_settings,
             patch("bruno.main.torch.cuda.is_available", return_value=True),
-            patch(
-                "bruno.main.torch.cuda.get_device_name", return_value="NVIDIA A100"
-            ),
+            patch("bruno.main.torch.cuda.get_device_name", return_value="NVIDIA A100"),
             patch("bruno.main.torch.set_grad_enabled"),
             patch("bruno.main.torch._dynamo.config"),
             patch("bruno.main.transformers.logging"),

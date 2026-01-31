@@ -116,9 +116,7 @@ class TestLoadPrompts:
         mock_dataset = MagicMock()
         mock_dataset.__iter__ = MagicMock(return_value=mock_stream)
 
-        with patch(
-            "bruno.utils.load_dataset", return_value=mock_dataset
-        ) as mock_load:
+        with patch("bruno.utils.load_dataset", return_value=mock_dataset) as mock_load:
             with patch("bruno.utils.Path") as mock_path:
                 mock_path.return_value.exists.return_value = False
 
