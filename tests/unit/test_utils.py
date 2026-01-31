@@ -517,7 +517,7 @@ class TestGetReadmeIntro:
         # Should contain expected sections
         assert "decensored version" in intro
         assert "test-org/test-model" in intro
-        assert "Heretic" in intro
+        assert "Bruno" in intro
         assert "Abliteration parameters" in intro
         assert "Performance" in intro
         assert "KL divergence" in intro
