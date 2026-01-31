@@ -830,10 +830,22 @@ class TestModelPCAExtraction:
 
     @pytest.mark.slow
     def test_get_refusal_directions_pca_gpu_performance(self):
-        """Test GPU-accelerated PCA performance on realistic dimensions."""
+        """Test GPU-accelerated PCA performance on realistic dimensions.
+        
+        Requires 16GB+ VRAM to allocate tensors for 32B model dimensions.
+        """
         import time
 
         from bruno.model import Model
+
+        # Skip if no CUDA available
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA not available")
+        
+        # Skip if insufficient VRAM (need 16GB+ for 32B model dimensions)
+        gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        if gpu_memory_gb < 16:
+            pytest.skip(f"Insufficient VRAM: {gpu_memory_gb:.1f}GB (need 16GB+)")
 
         mock_model = MagicMock()
 
@@ -843,7 +855,7 @@ class TestModelPCAExtraction:
         n_layers = 64  # Qwen2.5-Coder-32B has 64 layers
         hidden_dim = 5120  # 32B hidden dimension
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda"  # Already verified CUDA is available with sufficient VRAM
 
         good_residuals = torch.randn(n_samples, n_layers, hidden_dim, device=device)
         bad_residuals = torch.randn(n_samples, n_layers, hidden_dim, device=device)
