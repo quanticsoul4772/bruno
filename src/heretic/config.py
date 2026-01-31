@@ -16,6 +16,9 @@ class DatasetSpecification(BaseModel):
     dataset: str = Field(
         description="Hugging Face dataset ID, or path to dataset on disk"
     )
+    config: str | None = Field(
+        default=None, description="Dataset configuration name (e.g., 'en' for C4)"
+    )
     split: str = Field(description="Portion of the dataset to use")
     column: str = Field(description="Column in the dataset that contains the prompts")
 

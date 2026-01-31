@@ -95,6 +95,211 @@ class TestLoadPrompts:
 
         assert prompts == ["local1", "local2"]
 
+    def test_load_prompts_c4_streaming(self):
+        """Test that C4 dataset uses streaming to avoid large downloads."""
+
+        from heretic.config import DatasetSpecification
+        from heretic.utils import load_prompts
+
+        spec = DatasetSpecification(
+            dataset="allenai/c4",
+            config="en",
+            split="train[:200]",
+            column="text",
+        )
+
+        # Mock streaming dataset
+        mock_examples = [{"text": f"c4_prompt_{i}"} for i in range(200)]
+        mock_stream = iter(mock_examples)
+
+        # Create a mock dataset that supports iteration
+        mock_dataset = MagicMock()
+        mock_dataset.__iter__ = MagicMock(return_value=mock_stream)
+
+        with patch(
+            "heretic.utils.load_dataset", return_value=mock_dataset
+        ) as mock_load:
+            with patch("heretic.utils.Path") as mock_path:
+                mock_path.return_value.exists.return_value = False
+
+                prompts = load_prompts(spec)
+
+        # Verify streaming was used with base split (no slice notation)
+        mock_load.assert_called_once_with(
+            "allenai/c4", "en", split="train", streaming=True
+        )
+
+        # Verify correct number of prompts
+        assert len(prompts) == 200
+        assert prompts[0] == "c4_prompt_0"
+        assert prompts[199] == "c4_prompt_199"
+
+    def test_load_prompts_c4_requires_config(self):
+        """Test that C4 without config fails loudly."""
+        import pytest
+
+        from heretic.config import DatasetSpecification
+        from heretic.utils import load_prompts
+
+        spec = DatasetSpecification(
+            dataset="allenai/c4",
+            config=None,  # Missing config
+            split="train[:200]",
+            column="text",
+        )
+
+        with patch("heretic.utils.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+
+            with pytest.raises(
+                ValueError, match="C4 dataset requires config parameter"
+            ):
+                load_prompts(spec)
+
+    def test_load_prompts_c4_requires_sample_count(self):
+        """Test that C4 without sample count fails loudly."""
+        import pytest
+
+        from heretic.config import DatasetSpecification
+        from heretic.utils import load_prompts
+
+        spec = DatasetSpecification(
+            dataset="allenai/c4",
+            config="en",
+            split="train",  # No sample count
+            column="text",
+        )
+
+        with patch("heretic.utils.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+
+            with pytest.raises(
+                ValueError, match="C4 dataset requires explicit sample count"
+            ):
+                load_prompts(spec)
+
+    def test_load_prompts_c4_stream_failure(self):
+        """Test that streaming failures raise clear errors."""
+        import pytest
+
+        from heretic.config import DatasetSpecification
+        from heretic.utils import load_prompts
+
+        spec = DatasetSpecification(
+            dataset="allenai/c4",
+            config="en",
+            split="train[:200]",
+            column="text",
+        )
+
+        with patch("heretic.utils.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+
+            with patch(
+                "heretic.utils.load_dataset",
+                side_effect=ConnectionError("Network down"),
+            ):
+                with pytest.raises(RuntimeError, match="Failed to stream C4 dataset"):
+                    load_prompts(spec)
+
+    def test_load_prompts_c4_stream_exhausted(self):
+        """Test that early stream exhaustion raises error."""
+        import pytest
+
+        from heretic.config import DatasetSpecification
+        from heretic.utils import load_prompts
+
+        spec = DatasetSpecification(
+            dataset="allenai/c4",
+            config="en",
+            split="train[:200]",
+            column="text",
+        )
+
+        # Mock streaming dataset with only 100 examples (less than requested 200)
+        mock_examples = [{"text": f"c4_prompt_{i}"} for i in range(100)]
+        mock_stream = iter(mock_examples)
+
+        mock_dataset = MagicMock()
+        mock_dataset.__iter__ = MagicMock(return_value=mock_stream)
+
+        with patch("heretic.utils.load_dataset", return_value=mock_dataset):
+            with patch("heretic.utils.Path") as mock_path:
+                mock_path.return_value.exists.return_value = False
+
+                with pytest.raises(ValueError, match="C4 stream exhausted early"):
+                    load_prompts(spec)
+
+    def test_load_prompts_c4_stream_iteration_error(self):
+        """Test that iteration errors during streaming raise clear errors."""
+        import pytest
+
+        from heretic.config import DatasetSpecification
+        from heretic.utils import load_prompts
+
+        spec = DatasetSpecification(
+            dataset="allenai/c4",
+            config="en",
+            split="train[:200]",
+            column="text",
+        )
+
+        # Mock a dataset that fails during iteration
+        def failing_iterator():
+            yield {"text": "prompt_0"}
+            yield {"text": "prompt_1"}
+            raise ConnectionError("Network interruption")
+
+        mock_dataset = MagicMock()
+        mock_dataset.__iter__ = MagicMock(return_value=failing_iterator())
+
+        with patch("heretic.utils.load_dataset", return_value=mock_dataset):
+            with patch("heretic.utils.Path") as mock_path:
+                mock_path.return_value.exists.return_value = False
+
+                with pytest.raises(RuntimeError, match="Failed to stream C4 examples"):
+                    load_prompts(spec)
+
+
+class TestParseSplitCount:
+    """Test _parse_split_count helper function."""
+
+    def test_parse_split_count_simple_slice(self):
+        """Test parsing simple slice like train[:200]."""
+        from heretic.utils import _parse_split_count
+
+        assert _parse_split_count("train[:200]") == 200
+
+    def test_parse_split_count_range_slice(self):
+        """Test parsing range slice like train[400:600]."""
+        from heretic.utils import _parse_split_count
+
+        assert _parse_split_count("train[400:600]") == 200
+
+    def test_parse_split_count_small_range(self):
+        """Test parsing small range like train[100:150]."""
+        from heretic.utils import _parse_split_count
+
+        assert _parse_split_count("train[100:150]") == 50
+
+    def test_parse_split_count_no_slice(self):
+        """Test parsing split without slice notation."""
+        from heretic.utils import _parse_split_count
+
+        assert _parse_split_count("train") is None
+
+    def test_parse_split_count_validation_split(self):
+        """Test parsing validation split with slice."""
+        from heretic.utils import _parse_split_count
+
+        assert _parse_split_count("validation[:100]") == 100
+
+    def test_parse_split_count_zero_start(self):
+        """Test parsing slice starting from zero."""
+        from heretic.utils import _parse_split_count
+
+        assert _parse_split_count("train[0:50]") == 50
+
 
 class TestBatchify:
     """Test batchify function."""

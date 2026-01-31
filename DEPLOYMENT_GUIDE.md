@@ -222,41 +222,54 @@ The GPU PCA optimization provides **15-20x speedup** for large models:
 
 ### With Orthogonalization (Default - Uses C4 Dataset)
 
+**v1.1.0+ with C4 Streaming:**
+
 | Model Size | Minimum Disk | Recommended | Notes |
 |------------|--------------|-------------|-------|
-| 7B | 100GB | 150GB | C4 adds ~50GB |
-| 13B | 150GB | 200GB | C4 adds ~50-100GB |
-| 32B | **400GB** | **500GB** | C4 adds ~65-150GB |
-| 70B | **500GB** | **600GB** | C4 adds ~100-200GB |
+| 7B | 75GB | 100GB | Streaming eliminates C4 overhead |
+| 13B | 100GB | 150GB | Streaming eliminates C4 overhead |
+| 32B | **200GB** | **250GB** | ✅ C4 streams on-demand (~0GB) |
+| 70B | **300GB** | **400GB** | ✅ C4 streams on-demand (~0GB) |
 
-**C4 Dataset Disk Issue:**
-- C4 (Colossal Clean Crawled Corpus) is ~800GB total for "en" variant
-- Even small splits like `train[:200]` download 65-150GB due to shard-based downloading
-- HuggingFace downloads entire shards (~320MB compressed each), not individual examples
-- 200GB disk will run out of space during C4 download for 32B models
+**C4 Streaming (v1.1.0+):**
+- ✅ **C4 dataset now streams automatically** - no disk space overhead
+- Downloads only the exact examples needed as they're requested
+- Requires network connectivity during dataset loading
+- No configuration changes needed - works automatically for any dataset with "c4" in name
 
-**Why C4 is so large:**
-- 1024 shards, ~356,000 examples per shard
-- Examples distributed across all shards for balanced sampling
-- Small splits trigger downloading many shards to get representative sample
-
-**Example: 32B model with orthogonalization**
+**Example: 32B model with orthogonalization (v1.1.0+)**
 ```
-Qwen2.5-Coder-32B model:     62GB
-C4 dataset (train[:200]):    65-150GB (partial, 21% of shards)
+Qwen2.5-Coder-32B model:     65.5GB
+C4 dataset (streaming):      ~0GB (on-demand)
 BART-MNLI (neural detect):   1.6GB
+Other datasets:              0.1GB
 Working space:               20GB
 ─────────────────────────────────────
-TOTAL:                       150-230GB
+TOTAL:                       ~87GB ✅
 ```
 
-**Solutions if you hit disk limit:**
-1. **Recreate with 400GB+ disk** (recommended)
-2. Reduce C4 split: `--unhelpfulness-prompts.split "train[:50]"`
-3. Use smaller dataset instead of C4
-4. Disable orthogonalization: `--orthogonalize-directions false`
+**Disk Space Savings:** C4 streaming eliminates 30-50GB download overhead, reducing total requirements from 150-230GB to ~87GB for 32B models.
 
-**Important:** Default 100GB is insufficient for 32B+ models with orthogonalization.
+---
+
+### Legacy: v1.0.x Disk Requirements (Pre-Streaming)
+
+**Only relevant if using v1.0.x or earlier:**
+
+| Model Size | Minimum Disk | Recommended | Notes |
+|------------|--------------|-------------|-------|
+| 32B | **400GB** | **500GB** | v1.0.x downloads C4 shards |
+| 70B | **500GB** | **600GB** | v1.0.x downloads C4 shards |
+
+**Legacy C4 Issue (v1.0.x):**
+- C4 dataset downloaded 65-150GB even for small splits
+- Caused "No space left on device" errors on 200GB disks
+- **Solution:** Upgrade to v1.1.0+ for streaming support
+
+**Legacy Solutions (if stuck on v1.0.x):**
+1. Recreate with 400GB+ disk
+2. Reduce C4 split: `--unhelpfulness-prompts.split "train[:50]"`
+3. Disable orthogonalization: `--orthogonalize-directions false`
 
 ## Cost Optimization
 

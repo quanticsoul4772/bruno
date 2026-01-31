@@ -39,9 +39,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### RULE 5: ALWAYS CHECK DISK SPACE BEFORE CREATING CLOUD INSTANCES
 **BEFORE creating ANY Vast.ai instance:**
 1. Calculate required storage: `(model_size × 2) + 20GB`
-2. For 32B models: **MINIMUM 200GB disk**
-3. For 70B models: **MINIMUM 400GB disk**
+2. For 32B models: **MINIMUM 200GB disk** (C4 streaming enabled since v1.1.0)
+3. For 70B models: **MINIMUM 300GB disk**
 4. **DEFAULT 100GB IS NOT ENOUGH FOR 32B MODELS**
+
+**Note:** v1.1.0+ uses streaming for C4 dataset, eliminating 30-50GB download overhead.
 
 ---
 
@@ -515,16 +517,30 @@ column = "text"
 **Important:** CLI arguments ALWAYS override TOML config. If you pass `--unhelpfulness-prompts.dataset` on CLI, you must also pass `--unhelpfulness-prompts.config` or it defaults to `None`.
 
 ### C4 Dataset Disk Space Requirements
-**Problem:** "No space left on device" while downloading C4 dataset, even with 200GB disk.
 
-**Cause:** C4 (Colossal Clean Crawled Corpus) is very large:
+**RESOLVED in v1.1.0+:** C4 dataset now uses streaming, eliminating the disk space overhead.
+
+**Previous Problem (v1.0.x and earlier):** "No space left on device" while downloading C4 dataset, even with 200GB disk.
+
+**Previous Cause:** C4 (Colossal Clean Crawled Corpus) download behavior:
 - **Total size:** ~800GB for "en" variant
 - **Structure:** 1024 shards (~320MB each compressed, 1-2GB uncompressed)
-- **Download behavior:** HuggingFace downloads entire shards, not individual examples
-- **Split `train[:200]`:** Downloads 200+ shards (~65GB+) to get 200 examples spread across dataset
+- **Download behavior:** HuggingFace downloaded entire shards, not individual examples
+- **Split `train[:200]`:** Downloaded 200+ shards (~65GB+) to get 200 examples
 
-**Why so large for small splits?**
-- Examples are distributed across all 1024 shards for balanced sampling
+**Current Solution (v1.1.0+):**
+- C4 dataset automatically streams on-demand
+- Only downloads the exact examples needed (~0GB disk overhead)
+- No configuration changes required
+- Requires network connectivity during dataset loading
+
+**Implementation Details:**
+- Automatic detection: Any dataset with "c4" in name uses streaming
+- Maintains API compatibility: Returns same `list[str]` as before
+- Error handling: Fails loudly with clear messages if network unavailable
+- See `claudedocs/c4_streaming_implementation.md` for technical details
+
+**Fallback for v1.0.x (if not upgrading):**
 - `split = "train[:200]"` triggers downloading many shards to get representative sample
 - Each shard contains ~356,000 examples, but library downloads whole shards
 

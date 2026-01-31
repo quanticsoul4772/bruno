@@ -67,17 +67,133 @@ def format_duration(seconds: float) -> str:
         return f"{seconds}s"
 
 
+def _parse_split_count(split: str) -> int | None:
+    """Parse sample count from split string like 'train[:200]'.
+
+    Args:
+        split: Split specification (e.g., "train[:200]", "train[400:600]")
+
+    Returns:
+        Sample count if parseable, None if no count specified (e.g., "train")
+
+    Examples:
+        "train[:200]" -> 200
+        "train[400:600]" -> 200 (600-400)
+        "train[100:150]" -> 50
+        "train" -> None
+    """
+    import re
+
+    # Match patterns like [M:N] or [:N]
+    match = re.search(r"\[(\d*):(\d+)\]", split)
+    if match:
+        start_str, end_str = match.groups()
+        start = int(start_str) if start_str else 0
+        end = int(end_str)
+        return end - start
+
+    # No slice notation - no count specified
+    return None
+
+
 def load_prompts(specification: DatasetSpecification) -> list[str]:
-    # Check if dataset is a local path (supports load_from_disk for local datasets)
+    """Load prompts from dataset, using streaming for large datasets like C4.
+
+    For C4 dataset, uses streaming to avoid downloading 30-50GB of shards
+    for small splits like train[:200]. Other datasets use standard download.
+
+    Args:
+        specification: Dataset configuration
+
+    Returns:
+        List of prompt strings
+
+    Raises:
+        ValueError: If C4 dataset is missing required config or sample count
+        RuntimeError: If streaming fails due to network or other issues
+    """
+    # Check if dataset is a local path
     dataset_path = Path(specification.dataset)
     if dataset_path.exists() and dataset_path.is_dir():
         # Local dataset saved with save_to_disk()
         dataset_dict = load_from_disk(specification.dataset)
         dataset = dataset_dict[specification.split]
+        return list(dataset[specification.column])
+
+    # HuggingFace Hub dataset
+    # Detect C4 dataset (massive, benefits from streaming)
+    is_c4 = "c4" in specification.dataset.lower()
+
+    if is_c4:
+        # C4 is ~800GB - use streaming to avoid downloading shards
+        # Parse split to extract sample count (e.g., "train[:200]" -> 200)
+        sample_count = _parse_split_count(specification.split)
+
+        # FAIL LOUDLY: C4 requires explicit sample count
+        if sample_count is None:
+            raise ValueError(
+                f"C4 dataset requires explicit sample count in split. "
+                f"Got: '{specification.split}'. "
+                f"Expected format: 'train[:N]' or 'train[M:N]'"
+            )
+
+        # FAIL LOUDLY: C4 requires config parameter
+        if not specification.config:
+            raise ValueError(
+                "C4 dataset requires config parameter (e.g., 'en'). "
+                "Use --unhelpfulness-prompts.config en"
+            )
+
+        # Extract base split name (e.g., "train[:200]" -> "train")
+        # Streaming datasets don't support slice notation in split parameter
+        import re
+
+        base_split = re.sub(r"\[.*\]", "", specification.split)
+
+        # Load as streaming dataset
+        try:
+            dataset = load_dataset(
+                specification.dataset,
+                specification.config,
+                split=base_split,  # Use base split without slice notation
+                streaming=True,  # KEY: Stream instead of download
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to stream C4 dataset. Network required. Original error: {e}"
+            ) from e
+
+        # Take N samples from stream and materialize to list
+        # This downloads only the data needed, not full shards
+        prompts = []
+        try:
+            for i, example in enumerate(dataset):
+                if i >= sample_count:
+                    break
+                prompts.append(example[specification.column])
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to stream C4 examples (got {len(prompts)}/{sample_count}). "
+                f"Check network connectivity. Original error: {e}"
+            ) from e
+
+        # FAIL LOUDLY: Verify we got expected count
+        if len(prompts) < sample_count:
+            raise ValueError(
+                f"C4 stream exhausted early: got {len(prompts)}, expected {sample_count}"
+            )
+
+        return prompts
     else:
-        # HuggingFace Hub dataset
-        dataset = load_dataset(specification.dataset, split=specification.split)
-    return list(dataset[specification.column])
+        # Other datasets: use existing download behavior
+        if specification.config:
+            dataset = load_dataset(
+                specification.dataset, specification.config, split=specification.split
+            )
+        else:
+            dataset = load_dataset(specification.dataset, split=specification.split)
+
+        return list(dataset[specification.column])
 
 
 T = TypeVar("T")
