@@ -430,8 +430,8 @@ class TestMMLUEvaluator:
             },
         ]
 
-        with patch("heretic.validation.load_dataset", return_value=mock_dataset):
-            with patch("heretic.validation.print"):
+        with patch("bruno.validation.load_dataset", return_value=mock_dataset):
+            with patch("bruno.validation.print"):
                 examples = evaluator._load_category("abstract_algebra")
 
         assert len(examples) == 2
@@ -503,7 +503,7 @@ class TestMMLUEvaluator:
             {"question": "Q6", "choices": ["a", "b", "c", "d"], "answer": "A"},  # Wrong
         ]
 
-        with patch("heretic.validation.print"):
+        with patch("bruno.validation.print"):
             result = evaluator.evaluate_category("test_category")
 
         assert result.total == 4
@@ -573,7 +573,7 @@ class TestAbliterationValidator:
 
         validator = AbliterationValidator(settings, mock_model, mock_evaluator)
 
-        with patch("heretic.validation.print"):
+        with patch("bruno.validation.print"):
             baseline = validator.establish_baseline()
 
         assert baseline.refusal_count == 80
@@ -600,7 +600,7 @@ class TestAbliterationValidator:
 
         validator = AbliterationValidator(settings, mock_model, mock_evaluator)
 
-        with patch("heretic.validation.print"):
+        with patch("bruno.validation.print"):
             post = validator.measure_post_abliteration()
 
         assert post.refusal_count == 15
@@ -642,13 +642,13 @@ class TestAbliterationValidator:
 
         # Establish baseline
         mock_evaluator.count_refusals.return_value = 80
-        with patch("heretic.validation.print"):
+        with patch("bruno.validation.print"):
             validator.establish_baseline()
 
         # Measure post-abliteration
         mock_evaluator.count_refusals.return_value = 10
         mock_evaluator._compute_kl_divergence.return_value = 0.3
-        with patch("heretic.validation.print"):
+        with patch("bruno.validation.print"):
             validator.measure_post_abliteration()
 
         report = validator.get_report()
@@ -676,7 +676,7 @@ class TestAbliterationValidator:
 
         validator = AbliterationValidator(settings, MagicMock(), mock_evaluator)
 
-        with patch("heretic.validation.print"):
+        with patch("bruno.validation.print"):
             validator.establish_baseline()
             validator.measure_post_abliteration()
             # Should not raise

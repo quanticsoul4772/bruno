@@ -369,7 +369,7 @@ bruno --model Qwen/Qwen2.5-Coder-32B-Instruct \
 |------|-------|
 | `--auto-select` | **REQUIRES a boolean value**: Use `--auto-select true`, NOT `--auto-select` |
 | `--compile` | Enable torch.compile() for ~1.5-2x inference speedup |
-| `--storage` | Optuna storage URL for resume support (e.g., `sqlite:///study.db`) |
+| `--storage` | Optuna storage URL for resume support (e.g., `sqlite:///bruno_study.db`) |
 | `--study-name` | Name for the Optuna study (default: `bruno_study`) |
 | `--refusal-check-tokens` | Tokens for refusal detection (default: 30, lower = faster) |
 | `--cache-weights` | Enable/disable in-memory weight caching (default: true). **Now works for 32B+ models!** (v1.2.0+) |

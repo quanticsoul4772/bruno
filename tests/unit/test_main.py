@@ -19,9 +19,9 @@ class TestMainEntryPoint:
         """Test main() catches KeyboardInterrupt gracefully."""
         from bruno.main import main
 
-        with patch("heretic.main.install"):
-            with patch("heretic.main.run", side_effect=KeyboardInterrupt()):
-                with patch("heretic.main.print") as mock_print:
+        with patch("bruno.main.install"):
+            with patch("bruno.main.run", side_effect=KeyboardInterrupt()):
+                with patch("bruno.main.print") as mock_print:
                     # Should not raise
                     main()
 
@@ -36,9 +36,9 @@ class TestMainEntryPoint:
         error = RuntimeError("Masked error")
         error.__context__ = KeyboardInterrupt()
 
-        with patch("heretic.main.install"):
-            with patch("heretic.main.run", side_effect=error):
-                with patch("heretic.main.print"):
+        with patch("bruno.main.install"):
+            with patch("bruno.main.run", side_effect=error):
+                with patch("bruno.main.print"):
                     # Should not raise because __context__ is KeyboardInterrupt
                     main()
 
@@ -46,8 +46,8 @@ class TestMainEntryPoint:
         """Test main() re-raises non-KeyboardInterrupt exceptions."""
         from bruno.main import main
 
-        with patch("heretic.main.install"):
-            with patch("heretic.main.run", side_effect=ValueError("Test error")):
+        with patch("bruno.main.install"):
+            with patch("bruno.main.run", side_effect=ValueError("Test error")):
                 with pytest.raises(ValueError, match="Test error"):
                     main()
 
@@ -74,9 +74,9 @@ class TestRunValidationErrors:
             pytest.skip("Could not generate ValidationError")
 
         # Mock Settings to raise the real ValidationError
-        with patch("heretic.main.Settings", side_effect=validation_error):
-            with patch("heretic.main.print") as mock_print:
-                with patch("heretic.main.os.environ", {}):
+        with patch("bruno.main.Settings", side_effect=validation_error):
+            with patch("bruno.main.print") as mock_print:
+                with patch("bruno.main.os.environ", {}):
                     # Should return early without crashing
                     run()
 
@@ -92,13 +92,13 @@ class TestRunGPUDetection:
         from bruno.main import run
 
         with (
-            patch("heretic.main.Settings") as mock_settings,
-            patch("heretic.main.torch.cuda.is_available", return_value=True),
+            patch("bruno.main.Settings") as mock_settings,
+            patch("bruno.main.torch.cuda.is_available", return_value=True),
             patch(
-                "heretic.main.torch.cuda.get_device_name", return_value="NVIDIA A100"
+                "bruno.main.torch.cuda.get_device_name", return_value="NVIDIA A100"
             ),
-            patch("heretic.main.print") as mock_print,
-            patch("heretic.main.Model") as mock_model_class,
+            patch("bruno.main.print") as mock_print,
+            patch("bruno.main.Model") as mock_model_class,
         ):
             # Setup minimal settings
             settings = MagicMock()
@@ -108,12 +108,12 @@ class TestRunGPUDetection:
             mock_model = MagicMock()
             mock_model_class.return_value = mock_model
 
-            with patch("heretic.main.load_datasets") as mock_load_datasets:
+            with patch("bruno.main.load_datasets") as mock_load_datasets:
                 mock_datasets = MagicMock()
                 mock_datasets.good_prompts = ["prompt"]
                 mock_datasets.bad_prompts = ["bad prompt"]
                 mock_load_datasets.return_value = mock_datasets
-                with patch("heretic.main.Evaluator"):
+                with patch("bruno.main.Evaluator"):
                     run()
 
             # Check GPU type was printed
@@ -125,16 +125,16 @@ class TestRunGPUDetection:
         from bruno.main import run
 
         with (
-            patch("heretic.main.Settings") as mock_settings,
-            patch("heretic.main.torch.cuda.is_available", return_value=False),
-            patch("heretic.main.is_xpu_available", return_value=False),
-            patch("heretic.main.is_mlu_available", return_value=False),
-            patch("heretic.main.is_sdaa_available", return_value=False),
-            patch("heretic.main.is_musa_available", return_value=False),
-            patch("heretic.main.is_npu_available", return_value=False),
-            patch("heretic.main.torch.backends.mps.is_available", return_value=False),
-            patch("heretic.main.print") as mock_print,
-            patch("heretic.main.Model") as mock_model_class,
+            patch("bruno.main.Settings") as mock_settings,
+            patch("bruno.main.torch.cuda.is_available", return_value=False),
+            patch("bruno.main.is_xpu_available", return_value=False),
+            patch("bruno.main.is_mlu_available", return_value=False),
+            patch("bruno.main.is_sdaa_available", return_value=False),
+            patch("bruno.main.is_musa_available", return_value=False),
+            patch("bruno.main.is_npu_available", return_value=False),
+            patch("bruno.main.torch.backends.mps.is_available", return_value=False),
+            patch("bruno.main.print") as mock_print,
+            patch("bruno.main.Model") as mock_model_class,
         ):
             settings = MagicMock()
             settings.evaluate_model = "test-model"
@@ -143,12 +143,12 @@ class TestRunGPUDetection:
             mock_model = MagicMock()
             mock_model_class.return_value = mock_model
 
-            with patch("heretic.main.load_datasets") as mock_load_datasets:
+            with patch("bruno.main.load_datasets") as mock_load_datasets:
                 mock_datasets = MagicMock()
                 mock_datasets.good_prompts = ["prompt"]
                 mock_datasets.bad_prompts = ["bad prompt"]
                 mock_load_datasets.return_value = mock_datasets
-                with patch("heretic.main.Evaluator"):
+                with patch("bruno.main.Evaluator"):
                     run()
 
             # Check warning was printed
@@ -164,21 +164,21 @@ class TestRunBatchSizeDetermination:
         from bruno.main import run
 
         with (
-            patch("heretic.main.Settings") as mock_settings,
-            patch("heretic.main.torch.cuda.is_available", return_value=True),
+            patch("bruno.main.Settings") as mock_settings,
+            patch("bruno.main.torch.cuda.is_available", return_value=True),
             patch(
-                "heretic.main.torch.cuda.get_device_name", return_value="NVIDIA A100"
+                "bruno.main.torch.cuda.get_device_name", return_value="NVIDIA A100"
             ),
-            patch("heretic.main.torch.set_grad_enabled"),
-            patch("heretic.main.torch._dynamo.config"),
-            patch("heretic.main.transformers.logging"),
-            patch("heretic.main.optuna.logging"),
-            patch("heretic.main.warnings"),
-            patch("heretic.main.print"),
-            patch("heretic.main.Model") as mock_model_class,
-            patch("heretic.main.load_datasets") as mock_load_datasets,
-            patch("heretic.main.Evaluator"),
-            patch("heretic.main.time.perf_counter") as mock_time,
+            patch("bruno.main.torch.set_grad_enabled"),
+            patch("bruno.main.torch._dynamo.config"),
+            patch("bruno.main.transformers.logging"),
+            patch("bruno.main.optuna.logging"),
+            patch("bruno.main.warnings"),
+            patch("bruno.main.print"),
+            patch("bruno.main.Model") as mock_model_class,
+            patch("bruno.main.load_datasets") as mock_load_datasets,
+            patch("bruno.main.Evaluator"),
+            patch("bruno.main.time.perf_counter") as mock_time,
         ):
             settings = MagicMock()
             settings.batch_size = 0  # Trigger auto-determination

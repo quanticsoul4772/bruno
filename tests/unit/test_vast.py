@@ -324,7 +324,7 @@ class TestRunVastaiCmd:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.find_vastai_cli", return_value=["vastai"]):
+        with patch("bruno.vast.find_vastai_cli", return_value=["vastai"]):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(
                     returncode=0,
@@ -344,7 +344,7 @@ class TestRunVastaiCmd:
 
         config = VastConfig(api_key="secret-key")
 
-        with patch("heretic.vast.find_vastai_cli", return_value=["vastai"]):
+        with patch("bruno.vast.find_vastai_cli", return_value=["vastai"]):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -372,7 +372,7 @@ class TestRunVastaiCmd:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.find_vastai_cli", return_value=["vastai"]):
+        with patch("bruno.vast.find_vastai_cli", return_value=["vastai"]):
             with patch("subprocess.run", side_effect=FileNotFoundError()):
                 code, stdout, stderr = run_vastai_cmd(["show", "instances"], config)
 
@@ -387,7 +387,7 @@ class TestRunVastaiCmd:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.find_vastai_cli", return_value=["vastai"]):
+        with patch("bruno.vast.find_vastai_cli", return_value=["vastai"]):
             with patch(
                 "subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 120)
             ):
@@ -406,7 +406,7 @@ class TestGetSSHInfo:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "ssh://root@ssh1.vast.ai:35702", "")
 
             result = get_ssh_info("12345", config)
@@ -419,7 +419,7 @@ class TestGetSSHInfo:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "ssh -p 35702 root@192.168.1.100", "")
 
             result = get_ssh_info("12345", config)
@@ -432,7 +432,7 @@ class TestGetSSHInfo:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "ssh -p 22222 root@ssh3.vast.ai", "")
 
             result = get_ssh_info("12345", config)
@@ -445,7 +445,7 @@ class TestGetSSHInfo:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "root@ssh5.vast.ai:44444", "")
 
             result = get_ssh_info("12345", config)
@@ -458,7 +458,7 @@ class TestGetSSHInfo:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (1, "", "Instance not found")
 
             result = get_ssh_info("12345", config)
@@ -471,7 +471,7 @@ class TestGetSSHInfo:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "some random output", "")
 
             result = get_ssh_info("12345", config)
@@ -495,7 +495,7 @@ class TestGetInstances:
             ]
         )
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, instances_json, "")
 
             result = get_instances(config)
@@ -510,7 +510,7 @@ class TestGetInstances:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "", "")
 
             result = get_instances(config)
@@ -523,9 +523,9 @@ class TestGetInstances:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (1, "", "Unauthorized")
-            with patch("heretic.vast.console.print"):  # Suppress output
+            with patch("bruno.vast.console.print"):  # Suppress output
                 result = get_instances(config)
 
         assert result == []
@@ -536,9 +536,9 @@ class TestGetInstances:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.run_vastai_cmd") as mock_cmd:
+        with patch("bruno.vast.run_vastai_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "not valid json", "")
-            with patch("heretic.vast.console.print"):  # Suppress output
+            with patch("bruno.vast.console.print"):  # Suppress output
                 result = get_instances(config)
 
         assert result == []
@@ -553,7 +553,7 @@ class TestGetRunningInstance:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.get_instances") as mock_get:
+        with patch("bruno.vast.get_instances") as mock_get:
             mock_get.return_value = [
                 {"id": 1, "actual_status": "stopped"},
                 {"id": 2, "actual_status": "running"},
@@ -571,7 +571,7 @@ class TestGetRunningInstance:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.get_instances") as mock_get:
+        with patch("bruno.vast.get_instances") as mock_get:
             mock_get.return_value = [
                 {"id": 1, "status": "running"},
             ]
@@ -586,7 +586,7 @@ class TestGetRunningInstance:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.get_instances") as mock_get:
+        with patch("bruno.vast.get_instances") as mock_get:
             mock_get.return_value = [
                 {"id": 1, "actual_status": "stopped"},
                 {"id": 2, "actual_status": "stopped"},
@@ -603,10 +603,10 @@ class TestGetRunningInstance:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.get_instances") as mock_get:
+        with patch("bruno.vast.get_instances") as mock_get:
             mock_get.return_value = []
-            with patch("heretic.vast.find_vastai_cli", return_value=["vastai"]):
-                with patch("heretic.vast.console.print"):  # Suppress output
+            with patch("bruno.vast.find_vastai_cli", return_value=["vastai"]):
+                with patch("bruno.vast.console.print"):  # Suppress output
                     result = get_running_instance(config)
 
         assert result is None
@@ -644,8 +644,8 @@ class TestGetConnection:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.FABRIC_AVAILABLE", False):
-            with patch("heretic.vast.console.print"):  # Suppress output
+        with patch("bruno.vast.FABRIC_AVAILABLE", False):
+            with patch("bruno.vast.console.print"):  # Suppress output
                 from bruno.vast import get_connection
 
                 result = get_connection("12345", config)
@@ -658,9 +658,9 @@ class TestGetConnection:
 
         config = VastConfig(api_key="test-key")
 
-        with patch("heretic.vast.FABRIC_AVAILABLE", True):
-            with patch("heretic.vast.get_ssh_info", return_value=None):
-                with patch("heretic.vast.console.print"):  # Suppress output
+        with patch("bruno.vast.FABRIC_AVAILABLE", True):
+            with patch("bruno.vast.get_ssh_info", return_value=None):
+                with patch("bruno.vast.console.print"):  # Suppress output
                     result = get_connection("12345", config)
 
         assert result is None
@@ -675,10 +675,10 @@ class TestGetConnection:
         mock_connection = MagicMock()
         mock_connection_cls.return_value = mock_connection
 
-        with patch("heretic.vast.FABRIC_AVAILABLE", True):
-            with patch("heretic.vast.Connection", mock_connection_cls):
+        with patch("bruno.vast.FABRIC_AVAILABLE", True):
+            with patch("bruno.vast.Connection", mock_connection_cls):
                 with patch(
-                    "heretic.vast.get_ssh_info", return_value=("ssh1.vast.ai", 22222)
+                    "bruno.vast.get_ssh_info", return_value=("ssh1.vast.ai", 22222)
                 ):
                     with patch("pathlib.Path.exists", return_value=True):
                         with patch(

@@ -122,7 +122,7 @@ class TestRefusalDirectionExtractor:
         # Mock settings with DatasetSpecification
         mock_settings = MagicMock()
 
-        with patch("heretic.utils.load_prompts") as mock_load:
+        with patch("bruno.utils.load_prompts") as mock_load:
             mock_load.side_effect = [
                 ["harmless prompt 1", "harmless prompt 2"],
                 ["harmful prompt 1", "harmful prompt 2"],

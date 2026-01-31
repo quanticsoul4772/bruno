@@ -30,7 +30,7 @@ class TestGPUMemoryInfo:
 
     def test_get_gpu_memory_info_no_cuda(self):
         """Test returns zeros when CUDA not available."""
-        with patch("heretic.utils.torch.cuda.is_available", return_value=False):
+        with patch("bruno.utils.torch.cuda.is_available", return_value=False):
             from bruno.utils import get_gpu_memory_info
 
             info = get_gpu_memory_info()
@@ -46,16 +46,16 @@ class TestGPUMemoryInfo:
         mock_props.total_memory = 8_000_000_000  # 8 GB
 
         with (
-            patch("heretic.utils.torch.cuda.is_available", return_value=True),
+            patch("bruno.utils.torch.cuda.is_available", return_value=True),
             patch(
-                "heretic.utils.torch.cuda.get_device_properties",
+                "bruno.utils.torch.cuda.get_device_properties",
                 return_value=mock_props,
             ),
             patch(
-                "heretic.utils.torch.cuda.memory_reserved", return_value=2_000_000_000
+                "bruno.utils.torch.cuda.memory_reserved", return_value=2_000_000_000
             ),
             patch(
-                "heretic.utils.torch.cuda.memory_allocated", return_value=1_500_000_000
+                "bruno.utils.torch.cuda.memory_allocated", return_value=1_500_000_000
             ),
         ):
             from bruno.utils import get_gpu_memory_info
@@ -70,9 +70,9 @@ class TestGPUMemoryInfo:
     def test_get_gpu_memory_info_handles_exception(self):
         """Test returns zeros on exception."""
         with (
-            patch("heretic.utils.torch.cuda.is_available", return_value=True),
+            patch("bruno.utils.torch.cuda.is_available", return_value=True),
             patch(
-                "heretic.utils.torch.cuda.get_device_properties",
+                "bruno.utils.torch.cuda.get_device_properties",
                 side_effect=RuntimeError("GPU error"),
             ),
         ):

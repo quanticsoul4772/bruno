@@ -32,7 +32,7 @@ class TestRefusalDetection:
             refusal_markers=default_refusal_markers,
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             # Return minimal prompt lists
             mock_load.return_value = ["test prompt"]
 
@@ -45,7 +45,7 @@ class TestRefusalDetection:
             ]
 
             # Patch print to avoid console output during tests
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -164,7 +164,7 @@ class TestEvaluatorScoring:
             kl_divergence_scale=1.0,
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt1", "prompt2", "prompt3"]
             mock_model.get_logprobs_batched.return_value = torch.randn(3, 32000)
             mock_model.get_responses_batched.return_value = [
@@ -173,7 +173,7 @@ class TestEvaluatorScoring:
                 "Sure!",
             ]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -189,12 +189,12 @@ class TestEvaluatorScoring:
             refusal_check_tokens=30,  # Short limit for speed
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt"]
             mock_model.get_logprobs_batched.return_value = torch.randn(1, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -229,12 +229,12 @@ class TestSoftRefusalDetection:
             ],
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["test prompt"]
             mock_model.get_logprobs_batched.return_value = torch.randn(1, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -277,12 +277,12 @@ class TestEvasivePatternDetection:
             ],
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["test prompt"]
             mock_model.get_logprobs_batched.return_value = torch.randn(1, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -321,12 +321,12 @@ class TestEvasivePatternDetection:
             ],
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["test prompt"]
             mock_model.get_logprobs_batched.return_value = torch.randn(1, 32000)
             mock_model.get_responses_batched.return_value = ["Sure!"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -349,13 +349,13 @@ class TestMultiTokenKLDivergence:
             kl_divergence_tokens=5,  # Multi-token mode
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt1", "prompt2"]
             # Multi-token returns shape (n_prompts, n_tokens, vocab_size)
             mock_model.get_logprobs_batched.return_value = torch.randn(2, 5, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -384,12 +384,12 @@ class TestComputeKLDivergence:
             kl_divergence_tokens=1,
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt1"]
             mock_model.get_logprobs_batched.return_value = torch.randn(1, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -410,12 +410,12 @@ class TestComputeKLDivergence:
             kl_divergence_tokens=3,
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt1"]
             mock_model.get_logprobs_batched.return_value = torch.randn(1, 3, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -440,12 +440,12 @@ class TestGetScore:
             kl_divergence_scale=1.0,
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt1", "prompt2"]
             mock_model.get_logprobs_batched.return_value = torch.randn(2, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -454,7 +454,7 @@ class TestGetScore:
         mock_model.get_logprobs_batched.return_value = torch.randn(2, 32000)
         mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
-        with patch("heretic.evaluator.print"):
+        with patch("bruno.evaluator.print"):
             score, kl_divergence, refusals = evaluator.get_score()
 
         assert isinstance(score, tuple)
@@ -471,12 +471,12 @@ class TestGetScore:
             kl_divergence_scale=1.0,
         )
 
-        with patch("heretic.evaluator.load_prompts") as mock_load:
+        with patch("bruno.evaluator.load_prompts") as mock_load:
             mock_load.return_value = ["prompt1", "prompt2"]
             mock_model.get_logprobs_batched.return_value = torch.randn(2, 32000)
             mock_model.get_responses_batched.return_value = ["I'm sorry", "Sure!"]
 
-            with patch("heretic.evaluator.print"):
+            with patch("bruno.evaluator.print"):
                 from bruno.evaluator import Evaluator
 
                 evaluator = Evaluator(settings, mock_model)
@@ -485,7 +485,7 @@ class TestGetScore:
         evaluator._compute_kl_divergence = MagicMock(return_value=0.5)
         evaluator.count_refusals = MagicMock(return_value=1)
 
-        with patch("heretic.evaluator.print"):
+        with patch("bruno.evaluator.print"):
             score, kl, refusals = evaluator.get_score()
 
         # Both methods should have been called

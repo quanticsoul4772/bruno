@@ -64,8 +64,8 @@ class TestLoadPrompts:
             return_value=["prompt1", "prompt2", "prompt3"]
         )
 
-        with patch("heretic.utils.load_dataset", return_value=mock_dataset):
-            with patch("heretic.utils.Path") as mock_path:
+        with patch("bruno.utils.load_dataset", return_value=mock_dataset):
+            with patch("bruno.utils.Path") as mock_path:
                 # Make path not exist (so it uses HuggingFace)
                 mock_path.return_value.exists.return_value = False
 
@@ -89,7 +89,7 @@ class TestLoadPrompts:
         mock_dataset.__getitem__ = MagicMock(return_value=["local1", "local2"])
         mock_dataset_dict.__getitem__ = MagicMock(return_value=mock_dataset)
 
-        with patch("heretic.utils.load_from_disk", return_value=mock_dataset_dict):
+        with patch("bruno.utils.load_from_disk", return_value=mock_dataset_dict):
             # Create actual directory so exists() returns True
             prompts = load_prompts(spec)
 
@@ -117,9 +117,9 @@ class TestLoadPrompts:
         mock_dataset.__iter__ = MagicMock(return_value=mock_stream)
 
         with patch(
-            "heretic.utils.load_dataset", return_value=mock_dataset
+            "bruno.utils.load_dataset", return_value=mock_dataset
         ) as mock_load:
-            with patch("heretic.utils.Path") as mock_path:
+            with patch("bruno.utils.Path") as mock_path:
                 mock_path.return_value.exists.return_value = False
 
                 prompts = load_prompts(spec)
@@ -149,7 +149,7 @@ class TestLoadPrompts:
             column="text",
         )
 
-        with patch("heretic.utils.Path") as mock_path:
+        with patch("bruno.utils.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
 
             with pytest.raises(
@@ -172,7 +172,7 @@ class TestLoadPrompts:
             column="text",
         )
 
-        with patch("heretic.utils.Path") as mock_path:
+        with patch("bruno.utils.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
 
             with pytest.raises(
@@ -196,14 +196,14 @@ class TestLoadPrompts:
             column="text",
         )
 
-        with patch("heretic.utils.Path") as mock_path:
+        with patch("bruno.utils.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
 
             # Mock time.sleep to avoid delays during retry loop
-            with patch("heretic.utils.time.sleep"):
+            with patch("bruno.utils.time.sleep"):
                 # Use requests.exceptions.ConnectionError, not builtins.ConnectionError
                 with patch(
-                    "heretic.utils.load_dataset",
+                    "bruno.utils.load_dataset",
                     side_effect=RequestsConnectionError("Network down"),
                 ):
                     with pytest.raises(
@@ -232,8 +232,8 @@ class TestLoadPrompts:
         mock_dataset = MagicMock()
         mock_dataset.__iter__ = MagicMock(return_value=mock_stream)
 
-        with patch("heretic.utils.load_dataset", return_value=mock_dataset):
-            with patch("heretic.utils.Path") as mock_path:
+        with patch("bruno.utils.load_dataset", return_value=mock_dataset):
+            with patch("bruno.utils.Path") as mock_path:
                 mock_path.return_value.exists.return_value = False
 
                 with pytest.raises(ValueError, match="Stream exhausted early"):
@@ -262,8 +262,8 @@ class TestLoadPrompts:
         mock_dataset = MagicMock()
         mock_dataset.__iter__ = MagicMock(return_value=failing_iterator())
 
-        with patch("heretic.utils.load_dataset", return_value=mock_dataset):
-            with patch("heretic.utils.Path") as mock_path:
+        with patch("bruno.utils.load_dataset", return_value=mock_dataset):
+            with patch("bruno.utils.Path") as mock_path:
                 mock_path.return_value.exists.return_value = False
 
                 # The ConnectionError during iteration is not caught by the retry logic
@@ -369,10 +369,10 @@ class TestEmptyCache:
         from bruno.utils import empty_cache
 
         with (
-            patch("heretic.utils.gc.collect") as mock_gc,
-            patch("heretic.utils.torch.cuda.is_available", return_value=True),
-            patch("heretic.utils.torch.cuda.empty_cache") as mock_cuda_cache,
-            patch("heretic.utils.is_xpu_available", return_value=False),
+            patch("bruno.utils.gc.collect") as mock_gc,
+            patch("bruno.utils.torch.cuda.is_available", return_value=True),
+            patch("bruno.utils.torch.cuda.empty_cache") as mock_cuda_cache,
+            patch("bruno.utils.is_xpu_available", return_value=False),
         ):
             empty_cache()
 
@@ -385,10 +385,10 @@ class TestEmptyCache:
         from bruno.utils import empty_cache
 
         with (
-            patch("heretic.utils.gc.collect"),
-            patch("heretic.utils.torch.cuda.is_available", return_value=False),
-            patch("heretic.utils.is_xpu_available", return_value=True),
-            patch("heretic.utils.torch.xpu.empty_cache") as mock_xpu_cache,
+            patch("bruno.utils.gc.collect"),
+            patch("bruno.utils.torch.cuda.is_available", return_value=False),
+            patch("bruno.utils.is_xpu_available", return_value=True),
+            patch("bruno.utils.torch.xpu.empty_cache") as mock_xpu_cache,
         ):
             empty_cache()
 
@@ -399,14 +399,14 @@ class TestEmptyCache:
         from bruno.utils import empty_cache
 
         with (
-            patch("heretic.utils.gc.collect"),
-            patch("heretic.utils.torch.cuda.is_available", return_value=False),
-            patch("heretic.utils.is_xpu_available", return_value=False),
-            patch("heretic.utils.is_mlu_available", return_value=False),
-            patch("heretic.utils.is_sdaa_available", return_value=False),
-            patch("heretic.utils.is_musa_available", return_value=False),
-            patch("heretic.utils.torch.backends.mps.is_available", return_value=True),
-            patch("heretic.utils.torch.mps.empty_cache") as mock_mps_cache,
+            patch("bruno.utils.gc.collect"),
+            patch("bruno.utils.torch.cuda.is_available", return_value=False),
+            patch("bruno.utils.is_xpu_available", return_value=False),
+            patch("bruno.utils.is_mlu_available", return_value=False),
+            patch("bruno.utils.is_sdaa_available", return_value=False),
+            patch("bruno.utils.is_musa_available", return_value=False),
+            patch("bruno.utils.torch.backends.mps.is_available", return_value=True),
+            patch("bruno.utils.torch.mps.empty_cache") as mock_mps_cache,
         ):
             empty_cache()
 
@@ -417,13 +417,13 @@ class TestEmptyCache:
         from bruno.utils import empty_cache
 
         with (
-            patch("heretic.utils.gc.collect") as mock_gc,
-            patch("heretic.utils.torch.cuda.is_available", return_value=False),
-            patch("heretic.utils.is_xpu_available", return_value=False),
-            patch("heretic.utils.is_mlu_available", return_value=False),
-            patch("heretic.utils.is_sdaa_available", return_value=False),
-            patch("heretic.utils.is_musa_available", return_value=False),
-            patch("heretic.utils.torch.backends.mps.is_available", return_value=False),
+            patch("bruno.utils.gc.collect") as mock_gc,
+            patch("bruno.utils.torch.cuda.is_available", return_value=False),
+            patch("bruno.utils.is_xpu_available", return_value=False),
+            patch("bruno.utils.is_mlu_available", return_value=False),
+            patch("bruno.utils.is_sdaa_available", return_value=False),
+            patch("bruno.utils.is_musa_available", return_value=False),
+            patch("bruno.utils.torch.backends.mps.is_available", return_value=False),
         ):
             empty_cache()
 

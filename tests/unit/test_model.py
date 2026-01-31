@@ -647,7 +647,7 @@ class TestModelResponses:
         # 5 prompts with batch_size=2 should result in 3 batches
         prompts = ["Prompt 1", "Prompt 2", "Prompt 3", "Prompt 4", "Prompt 5"]
 
-        with patch("heretic.model.batchify") as mock_batchify:
+        with patch("bruno.model.batchify") as mock_batchify:
             mock_batchify.return_value = [
                 ["Prompt 1", "Prompt 2"],
                 ["Prompt 3", "Prompt 4"],
@@ -705,7 +705,7 @@ class TestModelLogprobs:
 
         mock_model.get_logprobs = mock_get_logprobs
 
-        with patch("heretic.model.batchify") as mock_batchify:
+        with patch("bruno.model.batchify") as mock_batchify:
             mock_batchify.return_value = [
                 ["Prompt 1", "Prompt 2"],
                 ["Prompt 3"],
@@ -1128,8 +1128,8 @@ class TestModelIterativeAblation:
             ),
         }
 
-        with patch("heretic.model.print"):
-            with patch("heretic.model.empty_cache"):
+        with patch("bruno.model.print"):
+            with patch("bruno.model.empty_cache"):
                 rounds, kl_values = Model.abliterate_iterative(
                     mock_model,
                     good_prompts=["good1", "good2"],
@@ -1167,8 +1167,8 @@ class TestModelIterativeAblation:
             ),
         }
 
-        with patch("heretic.model.print"):
-            with patch("heretic.model.empty_cache"):
+        with patch("bruno.model.print"):
+            with patch("bruno.model.empty_cache"):
                 rounds, _ = Model.abliterate_iterative(
                     mock_model,
                     good_prompts=["good"],
@@ -1206,7 +1206,7 @@ class TestModelMultiDirectionAblation:
             ),
         }
 
-        with patch("heretic.model.print"):
+        with patch("bruno.model.print"):
             Model.abliterate_multi_direction(
                 mock_model,
                 refusal_directions,
@@ -1244,7 +1244,7 @@ class TestModelMultiDirectionAblation:
             ),
         }
 
-        with patch("heretic.model.print"):
+        with patch("bruno.model.print"):
             Model.abliterate_multi_direction(
                 mock_model,
                 refusal_directions,

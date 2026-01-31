@@ -54,11 +54,11 @@ kl_divergence_scale = 1.0
 n_trials = 200
 
 # Optuna study name (for resuming experiments).
-study_name = "heretic_study"
+study_name = "bruno_study"
 
 # Optuna storage URL for persisting trials (enables resume support).
 # Set to empty string to disable persistence (trials lost if process crashes).
-storage = "sqlite:///heretic_study.db"
+storage = "sqlite:///bruno_study.db"
 
 # Number of trials that use random sampling for the purpose of exploration.
 # Research shows 20-30 is sufficient; reduced from 60 for faster optimization.

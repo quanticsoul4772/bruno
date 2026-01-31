@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Vast.ai GPU Cloud Management CLI for Heretic
+# Vast.ai GPU Cloud Management CLI for Bruno
 #
 # A clean Python replacement for runpod.ps1 that uses:
 # - Fabric for SSH (no shell escaping hell!)
@@ -178,7 +178,7 @@ def find_vastai_cli() -> list[str]:
     # Check for vast.exe in current directory or script directory
     script_dir = Path(
         __file__
-    ).parent.parent.parent  # Go up from src/heretic to project root
+    ).parent.parent.parent  # Go up from src/bruno to project root
     for vast_path in [
         Path("vast.exe"),
         Path("vast"),
@@ -674,9 +674,9 @@ def validate_and_convert_instance_id(instance_id_str: str) -> str:
 @click.group()
 @click.pass_context
 def cli(ctx):
-    """Heretic Vast.ai GPU Cloud Management CLI.
+    """Bruno Vast.ai GPU Cloud Management CLI.
 
-    Manage GPU instances on Vast.ai for abliterating language models.
+    Manage GPU instances on Vast.ai for neural behavior engineering.
     """
     ctx.ensure_object(dict)
     ctx.obj["config"] = VastConfig.from_env()
@@ -881,9 +881,9 @@ def create_pod(ctx, tier: str, num_gpus: int):
                     f"SSH Host: [cyan]{host}[/]\n"
                     f"SSH Port: [cyan]{port}[/]\n\n"
                     f"Next steps:\n"
-                    f"  heretic-vast setup    # Install heretic\n"
-                    f"  heretic-vast run MODEL  # Abliterate\n"
-                    f"  heretic-vast stop     # Stop when done",
+                    f"  bruno-vast setup    # Install bruno\n"
+                    f"  bruno-vast run MODEL  # Abliterate\n"
+                    f"  bruno-vast stop     # Stop when done",
                     title="Success",
                     border_style="green",
                 )
@@ -892,7 +892,7 @@ def create_pod(ctx, tier: str, num_gpus: int):
 
     console.print("\n[yellow]Instance created but SSH not ready yet.[/]")
     console.print(f"Instance ID: {instance_id}")
-    console.print("Check status: heretic-vast list")
+    console.print("Check status: bruno-vast list")
 
 
 @cli.command("list")
@@ -908,7 +908,7 @@ def list_instances(ctx):
 @click.argument("instance_id", required=False)
 @click.pass_context
 def setup_instance(ctx, instance_id: Optional[str]):
-    """Install heretic on a Vast.ai instance."""
+    """Install bruno on a Vast.ai instance."""
     config = ctx.obj["config"]
 
     if not instance_id:
@@ -934,7 +934,7 @@ def setup_instance(ctx, instance_id: Optional[str]):
 
     console.print(
         Panel.fit(
-            f"Setting up Heretic on Vast.ai\n\nInstance ID: [cyan]{instance_id}[/]",
+            f"Setting up Bruno on Vast.ai\n\nInstance ID: [cyan]{instance_id}[/]",
             title="Setup",
         )
     )
@@ -949,7 +949,7 @@ def setup_instance(ctx, instance_id: Optional[str]):
         except TimeoutError as e:
             console.print("[red]SSH Connection Timeout[/]")
             console.print("[yellow]Solutions:[/]")
-            console.print("  1. Check instance is running (heretic-vast list)")
+            console.print("  1. Check instance is running (bruno-vast list)")
             console.print("  2. Verify instance SSH port is accessible")
             console.print("  3. Check network connection")
             raise SSHError(f"SSH connection timeout to instance {instance_id}") from e
@@ -999,14 +999,14 @@ def setup_instance(ctx, instance_id: Optional[str]):
         )
         console.print("  [green]✓[/] workspace configured")
 
-        status.update("[bold green]Installing heretic...")
+        status.update("[bold green]Installing bruno...")
         run_ssh_command(
             conn,
             "pip install --quiet git+https://github.com/quanticsoul4772/abliteration-workflow.git",
             timeout=300,  # Git clone + pip install can be slow
             critical=True,  # Must succeed
         )
-        console.print("  [green]✓[/] heretic installed (from abliteration-workflow)")
+        console.print("  [green]✓[/] bruno installed (from abliteration-workflow)")
 
         status.update("[bold green]Checking GPU...")
         gpu_info = run_ssh_command(
@@ -1020,7 +1020,7 @@ def setup_instance(ctx, instance_id: Optional[str]):
 
     console.print()
     console.print("[bold green]Setup complete![/]")
-    console.print("\nNext: heretic-vast run MODEL")
+    console.print("\nNext: bruno-vast run MODEL")
 
 
 @cli.command("run")
@@ -1028,7 +1028,7 @@ def setup_instance(ctx, instance_id: Optional[str]):
 @click.argument("instance_id", required=False)
 @click.pass_context
 def run_abliteration(ctx, model: str, instance_id: Optional[str]):
-    """Run heretic abliteration on a model."""
+    """Run bruno abliteration on a model."""
     config = ctx.obj["config"]
 
     # Validate model name
@@ -1060,11 +1060,11 @@ def run_abliteration(ctx, model: str, instance_id: Optional[str]):
         return
 
     model_name = model.replace("/", "-")
-    output_path = f"{MODELS_DIR}/{model_name}-heretic"
+    output_path = f"{MODELS_DIR}/{model_name}-bruno"
 
     console.print(
         Panel.fit(
-            f"Running Heretic Abliteration\n\n"
+            f"Running Bruno Abliteration\n\n"
             f"Model: [cyan]{model}[/]\n"
             f"Output: [cyan]{output_path}[/]\n"
             f"Instance: [cyan]{instance_id}[/]",
@@ -1080,15 +1080,15 @@ def run_abliteration(ctx, model: str, instance_id: Optional[str]):
         conn.open()
         console.print("\n[yellow]Starting abliteration (this will take a while)...[/]")
         console.print(
-            "[dim]Run 'heretic-vast watch' in another terminal to monitor progress[/]"
+            "[dim]Run 'bruno-vast watch' in another terminal to monitor progress[/]"
         )
         console.print()
 
-        # Run heretic with live output
+        # Run bruno with live output
         cmd = (
             f"export HF_HOME=/workspace/.cache/huggingface && "
             f"cd /workspace && "
-            f"heretic {model} --auto-select --auto-select-path {output_path}"
+            f"bruno {model} --auto-select --auto-select-path {output_path}"
         )
         # Stream the output
         conn.run(cmd, hide=False, warn=True)
@@ -1217,7 +1217,7 @@ def show_status(ctx, instance_id: Optional[str]):
 @click.argument("instance_id", required=False)
 @click.pass_context
 def show_progress(ctx, instance_id: Optional[str]):
-    """Check abliteration progress on a Vast.ai instance."""
+    """Check bruno progress on a Vast.ai instance."""
     config = ctx.obj["config"]
 
     if not instance_id:
@@ -1344,7 +1344,7 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
 
         # Collect data (with error handling for connection drops)
         try:
-            proc = run_ssh_command(conn, "ps aux | grep '[h]eretic' | head -1")
+            proc = run_ssh_command(conn, "ps aux | grep '[b]runo' | head -1")
             gpu_info = run_ssh_command(
                 conn,
                 "nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits",
@@ -1375,7 +1375,7 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
 
         # Header
         header_text = Text()
-        header_text.append("VAST.AI ABLITERATION DASHBOARD", style="bold cyan")
+        header_text.append("BRUNO ABLITERATION DASHBOARD", style="bold cyan")
         header_text.append(
             f"  │  Instance: {instance_id}  │  Time: {current_time}  │  Watch: {elapsed_str}"
         )
@@ -1389,10 +1389,10 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
         if proc.strip():
             process_table.add_row("Status", "[green]● RUNNING[/]")
 
-            # Extract model name from command line (e.g., "heretic Qwen/Qwen2.5-72B-Instruct")
-            # Look for pattern after "heretic" that looks like a HuggingFace model
+            # Extract model name from command line (e.g., "bruno Qwen/Qwen2.5-72B-Instruct")
+            # Look for pattern after "bruno" that looks like a HuggingFace model
             model_match = re.search(
-                r"heretic\s+(?:--model\s+)?([A-Za-z0-9_-]+/[A-Za-z0-9._-]+)", proc
+                r"bruno\s+(?:--model\s+)?([A-Za-z0-9_-]+/[A-Za-z0-9._-]+)", proc
             )
             if model_match:
                 process_table.add_row("Model", f"[cyan]{model_match.group(1)}[/]")
@@ -1400,7 +1400,7 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
             # Extract runtime from ps output (format: HH:MM or M:SS in TIME column)
             # ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
             time_match = re.search(
-                r"\s+(\d+:\d+)\s+(?:/opt/conda/bin/)?(?:python\s+)?(?:/opt/conda/bin/)?heretic",
+                r"\s+(\d+:\d+)\s+(?:/opt/conda/bin/)?(?:python\s+)?(?:/opt/conda/bin/)?bruno",
                 proc,
             )
             if time_match:
@@ -1482,7 +1482,7 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
         )
         layout["footer"].update(Panel(footer_text, style="dim"))
 
-        return Panel(layout, title="[bold]Heretic[/]", border_style="cyan")
+        return Panel(layout, title="[bold]Bruno[/]", border_style="cyan")
 
     console.print("[dim]Starting live dashboard (Ctrl+C to exit)...[/]")
 
@@ -1550,7 +1550,7 @@ def list_models(ctx, instance_id: Optional[str]):
     except Exception as e:
         console.print(f"[red]Error: {e}[/]")
 
-    console.print("\nDownload a model: heretic-vast download MODEL_NAME")
+    console.print("\nDownload a model: bruno-vast download MODEL_NAME")
 
 
 @cli.command("download")
@@ -1611,13 +1611,13 @@ def download_model(
         if not model_name:
             console.print("[yellow]Scanning for available models...[/]")
             models_output = run_ssh_command(
-                conn, f"ls -1 {MODELS_DIR}/ 2>/dev/null | grep -E '.*-heretic$'"
+                conn, f"ls -1 {MODELS_DIR}/ 2>/dev/null | grep -E '.*-bruno$'"
             )
             models = [m.strip() for m in models_output.strip().split("\n") if m.strip()]
 
             if not models:
-                console.print("[red]No abliterated models found[/]")
-                console.print("Run abliteration first: heretic-vast run MODEL")
+            console.print("[red]No abliterated models found[/]")
+            console.print("Run abliteration first: bruno-vast run MODEL")
                 return
 
             if len(models) == 1:
@@ -1661,7 +1661,7 @@ def download_model(
             console.print("  1. Check VAST_API_KEY is set in .env file")
             console.print("  2. Run: heretic-vast list (to verify API works)")
             console.print(
-                "  3. Try PowerShell script: .\\runpod.ps1 vast-download-model"
+                "  3. Try the download command again after verifying connection"
             )
             return
 
@@ -1699,7 +1699,7 @@ def download_model(
                     f"Location: [cyan]{local_path}[/]\n"
                     f"Duration: [cyan]{duration_str}[/]\n\n"
                     f"Don't forget to stop the instance:\n"
-                    f"  heretic-vast stop",
+                    f"  bruno-vast stop",
                     title="Success",
                     border_style="green",
                 )
@@ -1745,7 +1745,7 @@ def stop_instance(ctx, instance_id: Optional[str]):
     console.print(
         Panel.fit(
             f"[bold green]Instance Stopped - Billing Paused[/]\n\n"
-            f"Restart with: heretic-vast start {instance_id}",
+            f"Restart with: bruno-vast start {instance_id}",
             title="Stopped",
             border_style="green",
         )
@@ -1787,7 +1787,7 @@ def start_instance(ctx, instance_id: Optional[str]):
     )
     console.print(stdout)
     console.print("\n[green]Instance starting![/]")
-    console.print("Wait ~30 seconds, then run: heretic-vast list")
+    console.print("Wait ~30 seconds, then run: bruno-vast list")
 
 
 @cli.command("terminate")

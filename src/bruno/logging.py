@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
-"""Enhanced logging configuration for heretic.
+"""Enhanced logging configuration for Bruno.
 
 This module provides dual-mode logging:
 1. User-facing messages: Rich-formatted console output (print statements)
@@ -15,11 +15,11 @@ Usage:
     logger.error("Error occurred", exc_info=True)
 
     # Enable debug logging to file
-    export HERETIC_LOG_LEVEL=DEBUG
-    export HERETIC_LOG_FILE=heretic.log
+    export BRUNO_LOG_LEVEL=DEBUG
+    export BRUNO_LOG_FILE=bruno.log
 
     # Enable structured logging (JSON format)
-    export HERETIC_STRUCTURED_LOGGING=true
+    export BRUNO_STRUCTURED_LOGGING=true
 """
 
 import logging
@@ -40,7 +40,7 @@ except ImportError:
 
 def is_structured_logging_enabled() -> bool:
     """Check if structured logging is enabled via environment variable."""
-    return os.environ.get("HERETIC_STRUCTURED_LOGGING", "").lower() in (
+    return os.environ.get("BRUNO_STRUCTURED_LOGGING", "").lower() in (
         "true",
         "1",
         "yes",
@@ -55,15 +55,15 @@ def setup_logging(
     max_bytes: int = 10_485_760,  # 10MB
     backup_count: int = 5,
 ) -> logging.Logger:
-    """Configure enhanced logging for heretic.
+    """Configure enhanced logging for bruno.
 
     Args:
         enable_structured: Enable JSON structured logging. If None, uses
-            HERETIC_STRUCTURED_LOGGING environment variable.
-        log_file: Path to log file. If None, uses HERETIC_LOG_FILE env var
-            or defaults to "heretic.log".
+            BRUNO_STRUCTURED_LOGGING environment variable.
+        log_file: Path to log file. If None, uses BRUNO_LOG_FILE env var
+            or defaults to "bruno.log".
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR). If None, uses
-            HERETIC_LOG_LEVEL env var or defaults to INFO.
+            BRUNO_LOG_LEVEL env var or defaults to INFO.
         console_output: Enable console output (in addition to file). Default: False.
             User-facing messages should use Rich print() instead.
         max_bytes: Maximum log file size before rotation (default: 10MB).
@@ -80,18 +80,18 @@ def setup_logging(
         setup_logging(log_level="DEBUG", console_output=True)
 
         # Custom log file location
-        setup_logging(log_file="/workspace/heretic_debug.log")
+        setup_logging(log_file="/workspace/bruno_debug.log")
     """
     # Get log level from env or parameter
     if log_level is None:
-        log_level_str = os.environ.get("HERETIC_LOG_LEVEL", "INFO").upper()
+        log_level_str = os.environ.get("BRUNO_LOG_LEVEL", "INFO").upper()
         log_level = getattr(logging, log_level_str, logging.INFO)
     elif isinstance(log_level, str):
         log_level = getattr(logging, log_level.upper(), logging.INFO)
 
     # Get log file from env or parameter
     if log_file is None:
-        log_file = os.environ.get("HERETIC_LOG_FILE", "heretic.log")
+        log_file = os.environ.get("BRUNO_LOG_FILE", "bruno.log")
     log_file = Path(log_file)
 
     # Check structured logging preference
@@ -180,7 +180,7 @@ def _setup_standard_logging(
     )
 
     # Log startup info
-    logger = logging.getLogger("heretic")
+    logger = logging.getLogger("bruno")
     logger.debug(
         f"Logging initialized: level={logging.getLevelName(log_level)}, file={log_file}"
     )
@@ -260,21 +260,21 @@ def _setup_structlog(
         cache_logger_on_first_use=True,
     )
 
-    logger = structlog.get_logger("heretic")
+    logger = structlog.get_logger("bruno")
     logger.debug("Structured logging initialized", log_file=str(log_file))
 
     return logger
 
 
-def get_logger(name: str = "heretic") -> Any:
+def get_logger(name: str = "bruno") -> Any:
     """Get a logger instance.
 
     Returns a structlog logger if structured logging is enabled,
     otherwise returns a standard logging.Logger.
 
     Args:
-        name: Logger name (typically __name__ or "heretic.module")
-            Default: "heretic"
+        name: Logger name (typically __name__ or "bruno.module")
+            Default: "bruno"
 
     Returns:
         Logger instance

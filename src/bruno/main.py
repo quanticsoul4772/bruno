@@ -116,11 +116,13 @@ def run():
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     # Modified "Pagga" font from https://budavariam.github.io/asciiart-text/
-    print(f"[cyan]█░█░█▀▀░█▀▄░█▀▀░▀█▀░█░█▀▀[/]  v{version('heretic-llm')}")
-    print("[cyan]█▀█░█▀▀░█▀▄░█▀▀░░█░░█░█░░[/]")
+    print(f"[cyan]█▀▄░█▀▄░█░█░█▄░█░█▀█[/]  v{version('bruno-ai')}")
+    print("[cyan]█▀▄░█▀▄░█░█░█░▀█░█░█[/]")
     print(
-        "[cyan]▀░▀░▀▀▀░▀░▀░▀▀▀░░▀░░▀░▀▀▀[/]  [blue underline]https://github.com/p-e-w/heretic[/]"
+        "[cyan]▀▀░░▀░▀░▀▀▀░▀░░▀░▀▀▀[/]  [blue underline]https://github.com/quanticsoul4772/bruno[/]"
     )
+    print()
+    print("[dim]Named after Giordano Bruno (1548-1600) - Infinite possibilities[/]")
     print()
 
     if (
