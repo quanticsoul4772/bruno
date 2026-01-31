@@ -73,12 +73,14 @@ heretic --model Qwen/Qwen2.5-70B-Instruct \
 
 ## Model Size Guidelines
 
-| Size | GPU | Disk | Cache Weights | C4 Config |
-|------|-----|------|---------------|-----------|
-| 7B | 24GB | 100GB | ✅ Yes | ❌ No |
-| 13B | 24GB | 150GB | ❌ **No** | ❌ No |
-| 32B | 80GB | 200GB | ❌ **No** | ✅ **Yes** |
-| 70B | 80GB | 400GB | ❌ **No** | ✅ **Yes** |
+| Size | GPU | Disk (with C4) | Cache Weights | C4 Config |
+|------|-----|----------------|---------------|-----------|
+| 7B | 24GB | 150GB | ✅ Yes | ❌ No |
+| 13B | 24GB | 200GB | ❌ No | ❌ No |
+| 32B | 80GB | **400GB** | ❌ No | ✅ Yes |
+| 70B | 80GB | **500GB** | ❌ No | ✅ Yes |
+
+**Note:** C4 dataset adds 65-150GB even for small splits. 200GB is insufficient for 32B models.
 
 ## Troubleshooting
 

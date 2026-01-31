@@ -186,7 +186,47 @@ nohup heretic \
 - **PCA Extraction:** ✅ Completed in <5 minutes (vs 4-6 hours expected with CPU)
 - **GPU Utilization:** 87-100% during model loading and PCA
 - **Memory Usage:** 64-68GB / 140GB (well within limits)
-- **Status:** Currently downloading C4 dataset for orthogonalization (1024 files)
+
+### Issue 4: Disk Space Exhaustion During C4 Download
+**Problem:** "No space left on device" error at 21% C4 download (217/1024 shards) on 200GB disk.
+
+**Root Cause:**
+- C4 (Colossal Clean Crawled Corpus) is massive: ~800GB total for "en" variant
+- HuggingFace downloads entire shards (~320MB compressed, 1-2GB uncompressed)
+- Even small split `train[:200]` requires downloading 100+ shards (~65-150GB)
+- Examples distributed across all 1024 shards for balanced sampling
+
+**Disk usage when failure occurred:**
+```
+Qwen2.5-Coder-32B model:     62GB
+C4 dataset (21% complete):   65GB (217/1024 shards)
+BART-MNLI (neural detect):   1.6GB
+Working space:               10GB
+─────────────────────────────────────
+TOTAL:                       ~139GB / 200GB (70% full)
+Remaining:                   2.8MB (out of space!)
+```
+
+**Why 200GB wasn't enough:**
+- Model + partial C4 (21%) already used 127GB
+- Full C4 download would need 150-200GB more
+- Total projection: 200-250GB minimum
+
+**Solution:** Recreate instance with 400GB+ disk
+```bash
+# Search for H200 with 400GB+ disk
+vastai search offers 'gpu_name=H200 disk_space>=400 num_gpus=1' --order 'dph_total'
+
+# Create new instance
+vastai create instance <ID> --image ubuntu:22.04 --disk 400
+```
+
+**Lesson:** For 32B+ models with orthogonalization, **400GB minimum disk is required**.
+
+**Alternative solutions** (if disk-constrained):
+1. Reduce C4 split: `--unhelpfulness-prompts.split "train[:50]"` (75% reduction)
+2. Use smaller dataset instead of C4
+3. Disable orthogonalization: `--orthogonalize-directions false`
 
 ## Risk Assessment
 

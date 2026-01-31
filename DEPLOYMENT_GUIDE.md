@@ -209,16 +209,54 @@ The GPU PCA optimization provides **15-20x speedup** for large models:
 
 ## Disk Space Requirements
 
+### Without Orthogonalization (--orthogonalize-directions false)
+
 | Model Size | Minimum Disk | Recommended |
 |------------|--------------|-------------|
 | 7B | 50GB | 100GB |
 | 13B | 75GB | 150GB |
-| 32B | **200GB** | 250GB |
-| 70B | **400GB** | 500GB |
+| 32B | 150GB | 200GB |
+| 70B | 300GB | 400GB |
 
 **Formula:** `(model_size × 2) + 20GB` for model + cache + results
 
-**Critical:** Default 100GB is **NOT ENOUGH** for 32B models!
+### With Orthogonalization (Default - Uses C4 Dataset)
+
+| Model Size | Minimum Disk | Recommended | Notes |
+|------------|--------------|-------------|-------|
+| 7B | 100GB | 150GB | C4 adds ~50GB |
+| 13B | 150GB | 200GB | C4 adds ~50-100GB |
+| 32B | **400GB** | **500GB** | C4 adds ~65-150GB |
+| 70B | **500GB** | **600GB** | C4 adds ~100-200GB |
+
+**C4 Dataset Disk Issue:**
+- C4 (Colossal Clean Crawled Corpus) is ~800GB total for "en" variant
+- Even small splits like `train[:200]` download 65-150GB due to shard-based downloading
+- HuggingFace downloads entire shards (~320MB compressed each), not individual examples
+- 200GB disk will run out of space during C4 download for 32B models
+
+**Why C4 is so large:**
+- 1024 shards, ~356,000 examples per shard
+- Examples distributed across all shards for balanced sampling
+- Small splits trigger downloading many shards to get representative sample
+
+**Example: 32B model with orthogonalization**
+```
+Qwen2.5-Coder-32B model:     62GB
+C4 dataset (train[:200]):    65-150GB (partial, 21% of shards)
+BART-MNLI (neural detect):   1.6GB
+Working space:               20GB
+─────────────────────────────────────
+TOTAL:                       150-230GB
+```
+
+**Solutions if you hit disk limit:**
+1. **Recreate with 400GB+ disk** (recommended)
+2. Reduce C4 split: `--unhelpfulness-prompts.split "train[:50]"`
+3. Use smaller dataset instead of C4
+4. Disable orthogonalization: `--orthogonalize-directions false`
+
+**Important:** Default 100GB is insufficient for 32B+ models with orthogonalization.
 
 ## Cost Optimization
 

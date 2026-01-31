@@ -514,6 +514,52 @@ column = "text"
 
 **Important:** CLI arguments ALWAYS override TOML config. If you pass `--unhelpfulness-prompts.dataset` on CLI, you must also pass `--unhelpfulness-prompts.config` or it defaults to `None`.
 
+### C4 Dataset Disk Space Requirements
+**Problem:** "No space left on device" while downloading C4 dataset, even with 200GB disk.
+
+**Cause:** C4 (Colossal Clean Crawled Corpus) is very large:
+- **Total size:** ~800GB for "en" variant
+- **Structure:** 1024 shards (~320MB each compressed, 1-2GB uncompressed)
+- **Download behavior:** HuggingFace downloads entire shards, not individual examples
+- **Split `train[:200]`:** Downloads 200+ shards (~65GB+) to get 200 examples spread across dataset
+
+**Why so large for small splits?**
+- Examples are distributed across all 1024 shards for balanced sampling
+- `split = "train[:200]"` triggers downloading many shards to get representative sample
+- Each shard contains ~356,000 examples, but library downloads whole shards
+
+**Disk usage breakdown (32B model with C4):**
+- Qwen2.5-Coder-32B model: 62GB
+- C4 dataset (train[:200]): 65-150GB (partial download)
+- Working space: 20GB
+- **Total:** 150-230GB minimum
+
+**Solutions:**
+
+**Option 1: Use 400GB+ disk** (RECOMMENDED)
+```bash
+# Recreate instance with proper disk space
+vastai search offers 'gpu_name=H200 disk_space>=400 num_gpus=1'
+vastai create instance <ID> --image ubuntu:22.04 --disk 400
+```
+
+**Option 2: Reduce C4 split size**
+```toml
+[unhelpfulness_prompts]
+split = "train[:50]"  # 75% reduction, still effective
+```
+
+**Option 3: Use smaller unhelpfulness dataset**
+```toml
+[unhelpfulness_prompts]
+dataset = "wikitext"
+config = "wikitext-2-raw-v1"
+split = "train[:200]"
+column = "text"
+```
+
+**Best practice:** For 32B+ models with orthogonalization, use **400GB minimum disk**.
+
 ### Package Data Files Not Included in Wheel
 **Problem:** Config files or data files in project root aren't included in built wheel.
 
