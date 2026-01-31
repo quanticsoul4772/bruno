@@ -226,14 +226,14 @@ Examples:
     )
     parser.add_argument(
         "--storage",
-        default="sqlite:///heretic_study.db",
-        help="Optuna storage URL (default: sqlite:///heretic_study.db)",
+        default="sqlite:///bruno_study.db",
+        help="Optuna storage URL (default: sqlite:///bruno_study.db)",
     )
     parser.add_argument(
         "--study",
         dest="study_name",
-        default="heretic_study",
-        help="Study name (default: heretic_study)",
+        default="bruno_study",
+        help="Study name (default: bruno_study)",
     )
     parser.add_argument(
         "--output",

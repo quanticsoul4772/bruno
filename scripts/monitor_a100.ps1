@@ -44,7 +44,7 @@ if r.returncode == 0 and r.stdout.strip():
         }
 
         Write-Host "`nTo create instance:" -ForegroundColor Yellow
-        Write-Host "  uv run heretic-vast create A100_80GB 1`n" -ForegroundColor White
+        Write-Host "  uv run bruno-vast create A100_80GB 1`n" -ForegroundColor White
 
         # Play alert sound
         [Console]::Beep(1000, 500)
@@ -52,7 +52,7 @@ if r.returncode == 0 and r.stdout.strip():
         $response = Read-Host "Create instance now? (y/n)"
         if ($response -eq 'y') {
             Write-Host "Creating A100 80GB instance..." -ForegroundColor Green
-            uv run heretic-vast create A100_80GB 1
+            uv run bruno-vast create A100_80GB 1
             break
         }
     } else {

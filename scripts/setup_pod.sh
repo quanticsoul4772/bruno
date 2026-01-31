@@ -10,11 +10,11 @@ echo "========================================"
 echo
 
 # Phase 1: Install dependencies
-echo "[1/5] Installing git and heretic..."
+echo "[1/5] Installing git and bruno..."
 apt-get update -qq
 apt-get install -y -qq git
-pip install -q git+https://github.com/quanticsoul4772/heretic.git
-echo "  ✓ Heretic installed: $(pip show heretic-llm | grep Version)"
+pip install -q git+https://github.com/quanticsoul4772/bruno.git
+echo "  ✓ Heretic installed: $(pip show bruno-ai | grep Version)"
 
 # Phase 2: Setup environment
 echo
@@ -50,7 +50,7 @@ study_name = "qwen32b_a100"
 
 # Auto-save
 auto_select = true
-auto_select_path = "/workspace/models/Qwen2.5-Coder-32B-Instruct-heretic"
+auto_select_path = "/workspace/models/Qwen2.5-Coder-32B-Instruct-bruno"
 EOF
 
 echo "  ✓ Config created:"
@@ -68,7 +68,7 @@ echo "[5/5] Running test (1 trial, ~15-20 min)..."
 cd /workspace
 sed -i 's/n_trials = 200/n_trials = 1/' config.toml
 
-heretic > heretic_test.log 2>&1
+bruno > heretic_test.log 2>&1
 
 # Check results
 echo
@@ -84,9 +84,9 @@ if grep -q "OutOfMemoryError\|RuntimeError.*meta" heretic_test.log; then
 fi
 
 # Verify model saved
-if [ -d "/workspace/models/Qwen2.5-Coder-32B-Instruct-heretic" ]; then
+if [ -d "/workspace/models/Qwen2.5-Coder-32B-Instruct-bruno" ]; then
     echo "  ✓ Model saved successfully"
-    ls -lh /workspace/models/Qwen2.5-Coder-32B-Instruct-heretic/ | head -5
+    ls -lh /workspace/models/Qwen2.5-Coder-32B-Instruct-bruno/ | head -5
 else
     echo "  ✗ Model NOT saved - check logs"
     exit 1
@@ -101,9 +101,9 @@ echo "  ✓ SETUP COMPLETE - READY FOR PRODUCTION"
 echo "========================================"
 echo
 echo "Start production run (200 trials):"
-echo "  cd /workspace && nohup heretic > heretic.log 2>&1 &"
+echo "  cd /workspace && nohup bruno > bruno.log 2>&1 &"
 echo
 echo "Monitor:"
-echo "  tail -f /workspace/heretic.log"
+echo "  tail -f /workspace/bruno.log"
 echo
 echo "Expected: ~12-15 hours, ~\$14-18 total cost"

@@ -60,12 +60,12 @@ else
     echo -e "${GREEN}  PyTorch version is compatible${NC}"
 fi
 
-# Step 4: Install heretic-llm
+# Step 4: Install bruno-ai
 echo ""
-echo -e "${YELLOW}[4/5] Installing heretic-llm...${NC}"
-pip install --quiet heretic-llm
-HERETIC_VERSION=$(pip show heretic-llm 2>/dev/null | grep Version | awk '{print $2}' || echo "unknown")
-echo -e "${GREEN}  Installed heretic-llm v$HERETIC_VERSION${NC}"
+echo -e "${YELLOW}[4/5] Installing bruno-ai...${NC}"
+pip install --quiet bruno-ai
+HERETIC_VERSION=$(pip show bruno-ai 2>/dev/null | grep Version | awk '{print $2}' || echo "unknown")
+echo -e "${GREEN}  Installed bruno-ai v$HERETIC_VERSION${NC}"
 
 # Step 5: Clear GPU memory
 echo ""
@@ -89,7 +89,7 @@ echo -e "${YELLOW}GPU Status:${NC}"
 nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader
 
 # Create workspace directory
-mkdir -p /workspace/heretic
+mkdir -p /workspace/bruno
 
 # Summary
 echo ""
@@ -98,8 +98,8 @@ echo -e "${GREEN}  Setup Complete!${NC}"
 echo "========================================"
 echo ""
 echo "Next steps:"
-echo "  1. Run a test:     heretic Qwen/Qwen3-4B-Instruct-2507"
-echo "  2. Or full model:  heretic meta-llama/Llama-3.1-8B-Instruct"
+echo "  1. Run a test:     bruno Qwen/Qwen3-4B-Instruct-2507"
+echo "  2. Or full model:  bruno meta-llama/Llama-3.1-8B-Instruct"
 echo ""
-echo "Output will be saved to: /workspace/heretic/"
+echo "Output will be saved to: /workspace/bruno/"
 echo ""

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Patch heretic to add --auto-select flag"""
+"""Patch bruno to add --auto-select flag"""
 
 from pathlib import Path
 
-HERETIC_PATH = "/usr/local/lib/python3.11/dist-packages/heretic"
+HERETIC_PATH = "/usr/local/lib/python3.11/dist-packages/bruno"
 
 # Patch config.py
 config_path = Path(HERETIC_PATH) / "config.py"
@@ -65,9 +65,9 @@ auto_select_main_code = """
         if settings.auto_select_path:
             save_directory = settings.auto_select_path
         else:
-            # Default to model name with -heretic suffix
+            # Default to model name with -bruno suffix
             model_name = Path(settings.model).name
-            save_directory = f"./{model_name}-heretic"
+            save_directory = f"./{model_name}-bruno"
 
         print(f"Saving model to [bold]{save_directory}[/]...")
         model.model.save_pretrained(save_directory)
@@ -91,4 +91,4 @@ if "auto_select" not in main_content:
 else:
     print("auto_select already in main.py")
 
-print("Done! Run: heretic --help | grep auto")
+print("Done! Run: bruno --help | grep auto")

@@ -9,16 +9,16 @@ Write-Host "Setting up RunPod A100 80GB for 32B model abliteration..." -Foregrou
 Write-Host "Pod: $PodSSH`n" -ForegroundColor Gray
 
 # Phase 1: Install dependencies
-Write-Host "[1/5] Installing git and heretic..." -ForegroundColor Yellow
+Write-Host "[1/5] Installing git and bruno..." -ForegroundColor Yellow
 $commands = @"
 apt-get update -qq && apt-get install -y -qq git &&
-pip install -q git+https://github.com/quanticsoul4772/heretic.git &&
+pip install -q git+https://github.com/quanticsoul4772/bruno.git &&
 echo 'INSTALL_COMPLETE'
 "@
 
 $result = ssh -T $PodSSH $commands 2>&1
 if ($result -match "INSTALL_COMPLETE") {
-    Write-Host "  ✓ Git and heretic installed" -ForegroundColor Green
+    Write-Host "  ✓ Git and bruno installed" -ForegroundColor Green
 } else {
     Write-Host "  ✗ Installation failed" -ForegroundColor Red
     Write-Host $result
@@ -54,7 +54,7 @@ study_name = \"qwen32b_a100\"
 
 # Auto-save
 auto_select = true
-auto_select_path = \"/workspace/models/Qwen2.5-Coder-32B-Instruct-heretic\"
+auto_select_path = \"/workspace/models/Qwen2.5-Coder-32B-Instruct-bruno\"
 CONFIGEOF
 cat /workspace/config.toml &&
 echo 'CONFIG_COMPLETE'
@@ -81,7 +81,7 @@ Write-Host "  This will take ~15-20 minutes..." -ForegroundColor Gray
 $testCommands = @"
 cd /workspace &&
 sed -i 's/n_trials = 200/n_trials = 1/' config.toml &&
-timeout 1800 heretic 2>&1 | tee heretic_test.log &&
+timeout 1800 bruno 2>&1 | tee heretic_test.log &&
 echo 'TEST_COMPLETE'
 "@
 
@@ -110,7 +110,7 @@ Write-Host "`n[5/5] Starting production run (200 trials, ~12-15 hours)..." -Fore
 $prodCommands = @"
 cd /workspace &&
 sed -i 's/n_trials = 1/n_trials = 200/' config.toml &&
-nohup heretic > heretic.log 2>&1 & sleep 2 &&
+nohup bruno > bruno.log 2>&1 & sleep 2 &&
 ps aux | grep '[h]eretic' &&
 echo 'PRODUCTION_STARTED'
 "@
@@ -123,9 +123,9 @@ if ($prodResult -match "PRODUCTION_STARTED") {
     Write-Host "  ABLITERATION RUNNING" -ForegroundColor Green
     Write-Host ("="*70) -ForegroundColor Cyan
     Write-Host "`nMonitor progress with:" -ForegroundColor Yellow
-    Write-Host "  ssh -T $PodSSH 'tail -f /workspace/heretic.log'" -ForegroundColor White
+    Write-Host "  ssh -T $PodSSH 'tail -f /workspace/bruno.log'" -ForegroundColor White
     Write-Host "`nOr check trial count:" -ForegroundColor Yellow
-    Write-Host "  ssh -T $PodSSH 'grep \"Running trial\" /workspace/heretic.log | tail -5'" -ForegroundColor White
+    Write-Host "  ssh -T $PodSSH 'grep \"Running trial\" /workspace/bruno.log | tail -5'" -ForegroundColor White
     Write-Host "`nExpected completion: ~12-15 hours from now" -ForegroundColor Gray
     Write-Host "Estimated cost: `$14-18 total`n" -ForegroundColor Gray
 } else {

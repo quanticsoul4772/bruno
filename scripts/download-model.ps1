@@ -3,7 +3,7 @@
 #
 # USAGE:
 #   .\scripts\download-model.ps1
-#   .\scripts\download-model.ps1 -ModelName "Qwen-Qwen2.5-Coder-32B-Instruct-heretic"
+#   .\scripts\download-model.ps1 -ModelName "Qwen-Qwen2.5-Coder-32B-Instruct-bruno"
 
 param(
     [string]$ModelName = "",

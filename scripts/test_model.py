@@ -1,8 +1,8 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-print("Loading Llama-3.2-3B-heretic model...")
-model_path = "models/llama-3.2-3b-heretic"
+print("Loading Llama-3.2-3B-bruno model...")
+model_path = "models/llama-3.2-3b-bruno"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = AutoModelForCausalLM.from_pretrained(
     model_path, dtype=torch.float16, device_map="auto"

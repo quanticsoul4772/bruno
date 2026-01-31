@@ -138,7 +138,7 @@ $USE_WSL_SSH = $true  # Set to $false if WSL is not available
 # NOTE: RTX 4090 has 24GB VRAM, good for 8B models
 $DEFAULT_GPU = "NVIDIA GeForce RTX 4090"
 # PyTorch 2.4.0 is compatible with transformers 4.55+ (no manual upgrade needed!)
-# Python 3.11, CUDA 12.4.1 - works out of the box with heretic-llm
+# Python 3.11, CUDA 12.4.1 - works out of the box with bruno-ai
 $DEFAULT_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 # IMPORTANT: 20GB container disk is NOT enough (fills with pip packages)
 # 40GB minimum; 50GB+ recommended for larger models
@@ -146,9 +146,9 @@ $DEFAULT_VOLUME_GB = 50
 $DEFAULT_CONTAINER_DISK_GB = 40
 # ===========================
 
-$LOCAL_DIR = "C:\Development\Projects\heretic"
-$LOCAL_MODELS_DIR = "C:\Development\Projects\heretic\models"  # Local directory for downloaded models
-$REMOTE_DIR = "/workspace/heretic"
+$LOCAL_DIR = "C:\Development\Projects\bruno"
+$LOCAL_MODELS_DIR = "C:\Development\Projects\bruno\models"  # Local directory for downloaded models
+$REMOTE_DIR = "/workspace/bruno"
 $VAST_REMOTE_DIR = "/workspace"  # Vast.ai uses /workspace as default
 $VAST_MODELS_DIR = "/workspace/models"  # Remote directory for abliterated models
 $VLLM_PORT = 8000
@@ -513,8 +513,8 @@ VAST.AI MANAGEMENT (50% cheaper!):
   vast-start [id]  - Start instance
   vast-terminate [id] - Destroy instance
   vast-connect [id]- SSH to instance
-  vast-setup [id]  - Install heretic on instance
-  vast-run <model> - Run heretic on Vast.ai
+  vast-setup [id]  - Install bruno on instance
+  vast-run <model> - Run bruno on Vast.ai
   vast-exec <cmd>  - Execute command on Vast.ai
   vast-status      - GPU status on Vast.ai
   vast-progress    - Check abliteration progress
@@ -532,9 +532,9 @@ TOOLS:
 
 RUNPOD COMMANDS:
   connect       - SSH to RunPod (interactive)
-  setup         - Install heretic on RunPod
+  setup         - Install bruno on RunPod
   test          - Test with Qwen3-4B (~15 min)
-  run <model>   - Run heretic on model
+  run <model>   - Run bruno on model
   exec <cmd>    - Execute any command on RunPod
   status        - GPU status (nvidia-smi)
 
@@ -564,20 +564,20 @@ PRICE COMPARISON (RTX 4090):
 
 QUICK START (RunPod):
   .\runpod.ps1 create-pod                    # 1. Create pod
-  .\runpod.ps1 setup                         # 2. Install heretic
+  .\runpod.ps1 setup                         # 2. Install bruno
   .\runpod.ps1 run Qwen/Qwen3-4B-Instruct-2507  # 3. Abliterate
   .\runpod.ps1 stop-pod                      # 4. Stop when done
 
 QUICK START (Vast.ai - cheaper!):
   .\runpod.ps1 vast-create-pod               # 1. Create instance (RTX 4090)
-  .\runpod.ps1 vast-setup                    # 2. Install heretic
+  .\runpod.ps1 vast-setup                    # 2. Install bruno
   .\runpod.ps1 vast-run Qwen/Qwen3-4B-Instruct-2507  # 3. Abliterate
   .\runpod.ps1 vast-download-model           # 4. Download model to local
   .\runpod.ps1 vast-stop                     # 5. Stop when done
 
 LARGE MODEL WORKFLOW (70B+ models):
   .\runpod.ps1 vast-create-pod A100_80GB 2   # 1. Create with 2x A100 80GB (~`$3/hr)
-  .\runpod.ps1 vast-setup                    # 2. Install heretic
+  .\runpod.ps1 vast-setup                    # 2. Install bruno
   .\runpod.ps1 vast-run Qwen/Qwen2.5-72B-Instruct  # 3. Abliterate 72B model
   .\runpod.ps1 vast-download-model           # 4. Download model to local (~1hr for 70B)
   .\runpod.ps1 vast-stop                     # 5. Stop when done
@@ -879,7 +879,7 @@ query Pods {
     "create-pod" {
         Check-ApiKey
         $gpuType = if ($Arg1) { $Arg1 } else { $DEFAULT_GPU }
-        $podName = "heretic-$(Get-Date -Format 'MMdd-HHmm')"
+        $podName = "bruno-$(Get-Date -Format 'MMdd-HHmm')"
 
         # Read SSH public key to include in pod creation
         $sshPubKeyPath = "$SSH_KEY.pub"
@@ -1001,7 +1001,7 @@ query Pod {
                 Write-Host "========================================" -ForegroundColor Green
                 Write-Host ""
                 Write-Host "Next steps:" -ForegroundColor Yellow
-                Write-Host "  .\runpod.ps1 setup    # Install heretic" -ForegroundColor White
+                Write-Host "  .\runpod.ps1 setup    # Install bruno" -ForegroundColor White
                 Write-Host "  .\runpod.ps1 test     # Run test" -ForegroundColor White
                 Write-Host "  .\runpod.ps1 stop-pod # When done" -ForegroundColor White
             } else {
@@ -1319,8 +1319,8 @@ export TRANSFORMERS_CACHE=/workspace/.cache/huggingface
 mkdir -p /workspace/.cache/huggingface
 grep -q 'HF_HOME' ~/.bashrc || echo 'export HF_HOME=/workspace/.cache/huggingface' >> ~/.bashrc
 
-echo '[3/4] Installing heretic-llm...'
-pip install --quiet heretic-llm
+echo '[3/4] Installing bruno-ai...'
+pip install --quiet bruno-ai
 
 echo '[4/4] Preparing GPU...'
 fuser -k /dev/nvidia* 2>/dev/null || true
@@ -1369,7 +1369,7 @@ export HF_HOME=/workspace/.cache/huggingface
 cd /workspace
 echo 'Starting Heretic abliteration...'
 echo ''
-heretic Qwen/Qwen3-4B-Instruct-2507
+bruno Qwen/Qwen3-4B-Instruct-2507
 "@
 
             # Long timeout for model download + abliteration
@@ -1406,7 +1406,7 @@ cd /workspace
 echo 'Starting Heretic abliteration...'
 echo 'Model: $Arg1'
 echo ''
-heretic $Arg1
+bruno $Arg1
 "@
 
             # Long timeout for model download + abliteration
@@ -1503,7 +1503,7 @@ heretic $Arg1
         Check-Config
         if (-not $Arg1) {
             Write-Host "ERROR: Specify model path" -ForegroundColor Red
-            Write-Host "Example: .\runpod.ps1 vllm-start /workspace/heretic/models/llama-8b" -ForegroundColor Yellow
+            Write-Host "Example: .\runpod.ps1 vllm-start /workspace/bruno/models/llama-8b" -ForegroundColor Yellow
             exit 1
         }
 
@@ -1716,7 +1716,7 @@ tail -20 vllm.log
         if ($USE_WSL_SSH -and (Test-WSLAvailable)) {
             $progressCommands = @"
 echo '=== Process Status ==='
-ps aux | grep heretic | head -3
+ps aux | grep bruno | head -3
 echo ''
 echo '=== GPU Status ==='
 nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader
@@ -2027,7 +2027,7 @@ wsl -e vastai %*
             Write-Host "Script auto-configured!" -ForegroundColor Green
             Write-Host ""
             Write-Host "Next steps:" -ForegroundColor Yellow
-            Write-Host "  .\runpod.ps1 vast-setup    # Install heretic" -ForegroundColor White
+            Write-Host "  .\runpod.ps1 vast-setup    # Install bruno" -ForegroundColor White
             Write-Host "  .\runpod.ps1 vast-run <model>  # Abliterate" -ForegroundColor White
             Write-Host "  .\runpod.ps1 vast-stop     # Stop when done" -ForegroundColor White
         } else {
@@ -2206,9 +2206,9 @@ export HF_HOME=/workspace/.cache/huggingface
 export TRANSFORMERS_CACHE=/workspace/.cache/huggingface
 grep -q 'HF_HOME' ~/.bashrc || echo 'export HF_HOME=/workspace/.cache/huggingface' >> ~/.bashrc
 
-echo '[4/5] Installing heretic from GitHub...'
-pip install --quiet git+https://github.com/quanticsoul4772/heretic.git
-echo '  heretic installed'
+echo '[4/5] Installing bruno from GitHub...'
+pip install --quiet git+https://github.com/quanticsoul4772/bruno.git
+echo '  bruno installed'
 
 echo '[5/5] Checking GPU...'
 nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader
@@ -2265,7 +2265,7 @@ echo 'Next: .\\runpod.ps1 vast-run [model]'
 
         # Determine output path based on model name
         $modelName = $Arg1 -replace '/', '-'
-        $outputPath = "/workspace/models/$modelName-heretic"
+        $outputPath = "/workspace/models/$modelName-bruno"
 
         $runCommands = @"
 export HF_HOME=/workspace/.cache/huggingface
@@ -2274,7 +2274,7 @@ echo 'Starting Heretic abliteration...'
 echo 'Model: $Arg1'
 echo 'Output: $outputPath'
 echo ''
-heretic $Arg1 --auto-select --auto-select-path $outputPath
+bruno $Arg1 --auto-select --auto-select-path $outputPath
 "@
 
         $output = Invoke-VastSSHCommand -Commands $runCommands -InstanceId $instanceId -TimeoutSeconds 60
@@ -2341,7 +2341,7 @@ heretic $Arg1 --auto-select --auto-select-path $outputPath
 
         $progressCommands = @"
 echo '=== Process Status ==='
-ps aux | grep heretic | head -3
+ps aux | grep bruno | head -3
 echo ''
 echo '=== GPU Status ==='
 nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader
@@ -2730,7 +2730,7 @@ ls -la /workspace/*.db 2>/dev/null; ls -la /workspace/models/ 2>/dev/null; echo 
             Write-Host "Scanning for available models..." -ForegroundColor Yellow
             Write-Host ""
 
-            $listCmd = "ls -1 $VAST_MODELS_DIR/ 2>/dev/null | grep -E '.*-heretic$'"
+            $listCmd = "ls -1 $VAST_MODELS_DIR/ 2>/dev/null | grep -E '.*-bruno$'"
             $models = Invoke-VastSSHCommand -Commands $listCmd -InstanceId $instanceId -Quiet
 
             if (-not $models -or $models -match "No such file") {

@@ -239,7 +239,7 @@ if ($resultsLine) {
             Write-Host "  - Re-run with more trials" -ForegroundColor White
         } else {
             Write-Host "✗ ABLITERATION MAY HAVE FAILED" -ForegroundColor Red
-            Write-Host "  Most prompts were refused. Check the heretic logs." -ForegroundColor Red
+            Write-Host "  Most prompts were refused. Check the bruno logs." -ForegroundColor Red
         }
 
         # Save results

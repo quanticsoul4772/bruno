@@ -6,7 +6,7 @@
 #
 # STEPS:
 #   1 = Create instance
-#   2 = Setup heretic
+#   2 = Setup bruno
 #   3 = Start abliteration
 #   4 = Monitor
 
@@ -61,7 +61,7 @@ function Step3-StartAbliteration {
     Write-Host "Starting abliteration in background..." -ForegroundColor Cyan
 
     # Use single quotes to prevent PowerShell from interpreting special characters
-    & .\runpod.ps1 vast-exec 'export HF_HOME=/workspace/.cache/huggingface; cd /workspace; nohup heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models --storage sqlite:////workspace/heretic_study.db --study-name qwen32b-abliteration > /workspace/heretic.log 2>&1 &'
+    & .\runpod.ps1 vast-exec 'export HF_HOME=/workspace/.cache/huggingface; cd /workspace; nohup bruno --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models --storage sqlite:////workspace/bruno_study.db --study-name qwen32b-abliteration > /workspace/bruno.log 2>&1 &'
 
     Start-Sleep -Seconds 3
 
@@ -80,7 +80,7 @@ switch ($Step) {
     0 {
         Write-Host "This script will:" -ForegroundColor White
         Write-Host "  1. Create a Vast.ai instance with 4x RTX 4090" -ForegroundColor White
-        Write-Host "  2. Install heretic" -ForegroundColor White
+        Write-Host "  2. Install bruno" -ForegroundColor White
         Write-Host "  3. Start the abliteration - runs 5-6 hours" -ForegroundColor White
         Write-Host ""
 

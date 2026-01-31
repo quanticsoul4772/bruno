@@ -33,7 +33,7 @@ EOF
 echo "Config created:"
 cat /workspace/config.toml
 
-# 2. Start heretic abliteration on Qwen2.5-Coder-32B-Instruct
+# 2. Start bruno abliteration on Qwen2.5-Coder-32B-Instruct
 echo ""
 echo "Starting abliteration on Qwen2.5-Coder-32B-Instruct..."
-cd /workspace && heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models
+cd /workspace && bruno --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models

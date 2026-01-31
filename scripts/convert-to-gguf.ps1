@@ -2,8 +2,8 @@
 # This script converts safetensors models to quantized GGUF format
 #
 # USAGE:
-#   .\scripts\convert-to-gguf.ps1 -ModelPath ".\models\Qwen2.5-Coder-32B-heretic"
-#   .\scripts\convert-to-gguf.ps1 -ModelPath ".\models\Qwen2.5-Coder-32B-heretic" -Quantization "Q4_K_M"
+#   .\scripts\convert-to-gguf.ps1 -ModelPath ".\models\Qwen2.5-Coder-32B-bruno"
+#   .\scripts\convert-to-gguf.ps1 -ModelPath ".\models\Qwen2.5-Coder-32B-bruno" -Quantization "Q4_K_M"
 #
 # OUTPUT:
 #   Creates GGUF file ready for Ollama import
