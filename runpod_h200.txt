@@ -1,3 +1,0 @@
-POD_ID=sfa28q4v6ud1lt
-GPU=H200_141GB
-SSH=sfa28q4v6ud1lt-64410cb0@ssh.runpod.io

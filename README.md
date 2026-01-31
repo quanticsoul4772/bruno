@@ -450,9 +450,28 @@ See [ROADMAP.md](ROADMAP.md) for research directions and future plans.
 
 AGPL-3.0-or-later
 
+## Documentation
+
+**User Guides:**
+- [README.md](README.md) - This file (quick start and overview)
+- [WORKFLOW.md](WORKFLOW.md) - Comprehensive cloud GPU guide
+- [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Command cheatsheet
+- [LESSONS_LEARNED.md](LESSONS_LEARNED.md) - Troubleshooting and gotchas
+
+**Development:**
+- [CLAUDE.md](CLAUDE.md) - AI assistant guide (Claude Code instructions)
+- [ROADMAP.md](ROADMAP.md) - Vision and future research directions
+- [docs/](docs/) - Planning documents and implementation tracking
+- [claudedocs/](claudedocs/) - Technical analyses and reports
+
+**Examples:**
+- [examples/](examples/) - Example applications (chat interface, etc.)
+- [configs/](configs/) - Example configuration files
+- [scripts/](scripts/) - Utility scripts (use `heretic-vast` CLI instead)
+
 ## Resources
 
 - [Paper: Refusal in Language Models Is Mediated by a Single Direction](https://arxiv.org/abs/2406.11717)
 - [Abliterated Models Collection](https://huggingface.co/collections/p-e-w/the-bestiary)
-- [Project Roadmap](ROADMAP.md)
-- [Vast.ai Workflow](WORKFLOW.md)
+- [GitHub Repository](https://github.com/p-e-w/heretic)
+- [Fork (abliteration-workflow)](https://github.com/quanticsoul4772/abliteration-workflow)
