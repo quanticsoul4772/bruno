@@ -838,6 +838,26 @@ class Model:
             print("* Caching abliterable weights in memory (selective mode)...")
             self.layer_weights_cache = self._create_layer_weights_cache()
             self.original_state_dict = None  # Legacy attribute, no longer used
+
+            # Log cache statistics for verification
+            cache_size_mb = sum(
+                sum(m.numel() * m.element_size() for m in matrices)
+                for layer_cache in self.layer_weights_cache.values()
+                for matrices in layer_cache.values()
+            ) / (1024 ** 2)
+
+            total_params = sum(p.numel() for p in self.model.parameters())
+            cached_params = sum(
+                sum(m.numel() for m in matrices)
+                for layer_cache in self.layer_weights_cache.values()
+                for matrices in layer_cache.values()
+            )
+            cache_ratio = (cached_params / total_params) * 100 if total_params > 0 else 0
+
+            print(
+                f"  * Cache size: {cache_size_mb:.1f} MB "
+                f"({cached_params:,} params, {cache_ratio:.1f}% of model)"
+            )
         else:
             print("* Weight caching disabled (will reload from disk between trials)")
             self.layer_weights_cache = None
@@ -862,6 +882,9 @@ class Model:
             Nested dict mapping layer_idx -> component_name -> list of weight tensors.
             Structure matches get_layer_matrices() return format for seamless integration.
 
+        Raises:
+            ModelLoadError: If cache creation fails (OOM, layer access errors, etc.)
+
         Example structure:
             {
                 0: {
@@ -875,14 +898,66 @@ class Model:
         cache = {}
         num_layers = len(self.get_layers())
 
-        for layer_idx in range(num_layers):
-            layer_matrices = self.get_layer_matrices(layer_idx)
+        try:
+            for layer_idx in range(num_layers):
+                try:
+                    layer_matrices = self.get_layer_matrices(layer_idx)
+                except Exception as e:
+                    raise ModelLoadError(
+                        f"Failed to access layer {layer_idx} matrices during cache creation. "
+                        f"Model architecture may be incompatible. Error: {e}"
+                    ) from e
 
-            # Clone tensors: detach from computation graph, preserve device placement
-            cache[layer_idx] = {
-                component: [matrix.clone().detach() for matrix in matrices]
-                for component, matrices in layer_matrices.items()
-            }
+                # Clone tensors: detach from computation graph, preserve device placement
+                try:
+                    cache[layer_idx] = {
+                        component: [matrix.clone().detach() for matrix in matrices]
+                        for component, matrices in layer_matrices.items()
+                    }
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        raise ModelLoadError(
+                            f"Insufficient memory to create weight cache at layer {layer_idx}. "
+                            f"Try --cache-weights false to disable caching. "
+                            f"Original error: {e}"
+                        ) from e
+                    else:
+                        raise ModelLoadError(
+                            f"Failed to clone weights at layer {layer_idx}. "
+                            f"Error: {e}"
+                        ) from e
+
+            # Validation: Ensure cache is not empty and has expected structure
+            if not cache:
+                raise ModelLoadError(
+                    "Weight cache creation resulted in empty cache. "
+                    "Model may have 0 layers or get_layers() failed."
+                )
+
+            # Validate cache structure for first layer (representative check)
+            if 0 in cache:
+                if not cache[0]:
+                    raise ModelLoadError(
+                        "Layer 0 cache is empty. No abliterable components found. "
+                        "Model architecture may be incompatible."
+                    )
+
+                # Verify expected components exist
+                if "attn.o_proj" not in cache[0]:
+                    raise ModelLoadError(
+                        "Required component 'attn.o_proj' not found in layer 0 cache. "
+                        "Model architecture may be incompatible with abliteration."
+                    )
+
+        except ModelLoadError:
+            # Re-raise ModelLoadError as-is
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors
+            raise ModelLoadError(
+                f"Unexpected error during weight cache creation: {e}. "
+                f"Try --cache-weights false to disable caching."
+            ) from e
 
         return cache
 
@@ -895,23 +970,93 @@ class Model:
         The selective cache only stores abliterable components (attn.o_proj, mlp.down_proj),
         reducing memory usage by ~55% vs full state_dict caching while maintaining
         fast reload performance.
+
+        Raises:
+            ModelLoadError: If cache restoration fails (missing layers, shape mismatches, etc.)
         """
         if self.layer_weights_cache is not None:
             # Fast selective weight restoration (layer-wise)
             num_layers = len(self.get_layers())
 
+            # Validate cache matches current model structure
+            if len(self.layer_weights_cache) != num_layers:
+                raise ModelLoadError(
+                    f"Cache layer count mismatch: cache has {len(self.layer_weights_cache)} layers, "
+                    f"model has {num_layers} layers. Cache may be corrupted or from different model."
+                )
+
             with torch.no_grad():  # Disable gradient tracking for in-place copy operations
                 for layer_idx in range(num_layers):
-                    current_matrices = self.get_layer_matrices(layer_idx)
-                    cached_layer = self.layer_weights_cache[layer_idx]
+                    # Verify layer exists in cache
+                    if layer_idx not in self.layer_weights_cache:
+                        raise ModelLoadError(
+                            f"Layer {layer_idx} missing from weight cache. "
+                            f"Cache may be corrupted. Available layers: {sorted(self.layer_weights_cache.keys())}"
+                        )
+
+                    try:
+                        current_matrices = self.get_layer_matrices(layer_idx)
+                        cached_layer = self.layer_weights_cache[layer_idx]
+                    except Exception as e:
+                        raise ModelLoadError(
+                            f"Failed to access layer {layer_idx} during cache restoration: {e}"
+                        ) from e
 
                     for component, matrices in current_matrices.items():
+                        # Verify component exists in cache
+                        if component not in cached_layer:
+                            raise ModelLoadError(
+                                f"Component '{component}' missing from layer {layer_idx} cache. "
+                                f"Available components: {list(cached_layer.keys())}. "
+                                f"Model architecture may have changed."
+                            )
+
                         cached_matrices = cached_layer[component]
 
+                        # Verify matrix count matches
+                        if len(matrices) != len(cached_matrices):
+                            raise ModelLoadError(
+                                f"Matrix count mismatch at layer {layer_idx}, component '{component}': "
+                                f"model has {len(matrices)} matrices, cache has {len(cached_matrices)}. "
+                                f"Model architecture may have changed (e.g., expert count in MoE)."
+                            )
+
                         # Restore each matrix from cache
-                        # zip() automatically handles length matching for dense (1 tensor) vs MoE (multiple tensors)
-                        for matrix, cached in zip(matrices, cached_matrices):
-                            matrix.copy_(cached)
+                        for matrix_idx, (matrix, cached) in enumerate(zip(matrices, cached_matrices)):
+                            # Verify shapes match
+                            if matrix.shape != cached.shape:
+                                raise ModelLoadError(
+                                    f"Shape mismatch at layer {layer_idx}, component '{component}', "
+                                    f"matrix {matrix_idx}: model shape {matrix.shape}, "
+                                    f"cache shape {cached.shape}. Model architecture may have changed."
+                                )
+
+                            # Verify dtypes match
+                            if matrix.dtype != cached.dtype:
+                                logger.warning(
+                                    f"dtype mismatch at layer {layer_idx}, component '{component}', "
+                                    f"matrix {matrix_idx}: model dtype {matrix.dtype}, "
+                                    f"cache dtype {cached.dtype}. Converting cached tensor."
+                                )
+                                cached = cached.to(dtype=matrix.dtype)
+
+                            # Verify devices match
+                            if matrix.device != cached.device:
+                                logger.warning(
+                                    f"Device mismatch at layer {layer_idx}, component '{component}', "
+                                    f"matrix {matrix_idx}: model device {matrix.device}, "
+                                    f"cache device {cached.device}. Moving cached tensor."
+                                )
+                                cached = cached.to(device=matrix.device)
+
+                            # Perform restoration
+                            try:
+                                matrix.copy_(cached)
+                            except RuntimeError as e:
+                                raise ModelLoadError(
+                                    f"Failed to restore weights at layer {layer_idx}, "
+                                    f"component '{component}', matrix {matrix_idx}: {e}"
+                                ) from e
         else:
             # Fallback: Reload from disk when caching disabled
             self.model = AutoModelForCausalLM.from_pretrained(
