@@ -33,7 +33,10 @@ Abliteration (refusal removal) was the first surgery - but the scalpel works on 
 | Component | Status | Description |
 |-----------|--------|-------------|
 | **Core CLI** (`heretic`) | ✅ Mature | Optuna optimization, HF upload, auto-select |
-| **Cloud CLI** (`heretic-vast`) | ✅ New | Rich dashboard, SSH management, Vast.ai automation |
+| **Phase Modules** (`phases/`) | ✅ New | Modular pipeline (dataset, extraction, optimization, saving) |
+| **Sacred Directions** | ✅ New | Capability preservation via MMLU orthogonalization |
+| **Constants Module** | ✅ New | Centralized magic numbers and thresholds |
+| **Cloud CLI** (`heretic-vast`) | ✅ Mature | Rich dashboard, SSH management, Vast.ai automation |
 | **Chat UI** (`chat_app.py`) | ✅ Basic | Gradio, streaming, model switching |
 | **Deployment** | ✅ Ready | Docker image, RunPod/Vast.ai scripts |
 | **Experiments** | 🔬 Active | Verbosity spike in `experiments/verbosity/` |

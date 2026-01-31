@@ -253,7 +253,9 @@ class Evaluator:
                     "Falling back to string matching only.[/]"
                 )
                 self.neural_detector = None
-        self._use_neural_for_optuna = settings.neural_detection_for_optuna and self.neural_detector is not None
+        self._use_neural_for_optuna = (
+            settings.neural_detection_for_optuna and self.neural_detector is not None
+        )
 
         print()
         print(

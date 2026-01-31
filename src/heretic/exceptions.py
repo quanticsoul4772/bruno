@@ -12,6 +12,7 @@ class HereticError(Exception):
     This allows catching all heretic-specific errors with a single except clause
     while letting system exceptions (KeyboardInterrupt, SystemExit) propagate.
     """
+
     pass
 
 
@@ -19,11 +20,13 @@ class HereticError(Exception):
 # Model Errors (3)
 # ============================================================================
 
+
 class ModelError(HereticError):
     """Base exception for model-related errors.
 
     Covers errors during model loading, initialization, and inference.
     """
+
     pass
 
 
@@ -37,6 +40,7 @@ class ModelLoadError(ModelError):
     - Unsupported model architecture
     - Network timeout during download
     """
+
     pass
 
 
@@ -49,6 +53,7 @@ class ModelInferenceError(ModelError):
     - Tokenization errors
     - Model forward pass failures
     """
+
     pass
 
 
@@ -56,11 +61,13 @@ class ModelInferenceError(ModelError):
 # Dataset Errors (2)
 # ============================================================================
 
+
 class DatasetError(HereticError):
     """Base exception for dataset-related errors.
 
     Covers errors during dataset loading, processing, and validation.
     """
+
     pass
 
 
@@ -73,6 +80,7 @@ class DatasetConfigError(DatasetError):
     - Column not found in dataset
     - Dataset variant not available
     """
+
     pass
 
 
@@ -80,11 +88,13 @@ class DatasetConfigError(DatasetError):
 # Network Errors (2)
 # ============================================================================
 
+
 class NetworkError(HereticError):
     """Base exception for network-related errors.
 
     Covers errors during remote operations and API calls.
     """
+
     pass
 
 
@@ -97,6 +107,7 @@ class NetworkTimeoutError(NetworkError):
     - Large file download interrupted
     - API rate limiting
     """
+
     pass
 
 
@@ -104,11 +115,13 @@ class NetworkTimeoutError(NetworkError):
 # File I/O Errors (2)
 # ============================================================================
 
+
 class FileOperationError(HereticError):
     """Base exception for file operation errors.
 
     Covers errors during reading, writing, and file system operations.
     """
+
     pass
 
 
@@ -121,6 +134,7 @@ class ValidationFileError(FileOperationError):
     - Permission denied when reading/writing
     - Insufficient disk space
     """
+
     pass
 
 
@@ -128,11 +142,13 @@ class ValidationFileError(FileOperationError):
 # Cloud/SSH Errors (2)
 # ============================================================================
 
+
 class CloudError(HereticError):
     """Base exception for cloud provider errors.
 
     Covers errors during cloud instance operations (Vast.ai, etc.).
     """
+
     pass
 
 
@@ -145,6 +161,7 @@ class SSHError(CloudError):
     - Command execution timeout
     - Network interruption during remote operation
     """
+
     pass
 
 
@@ -152,11 +169,13 @@ class SSHError(CloudError):
 # Configuration Errors (2)
 # ============================================================================
 
+
 class ConfigurationError(HereticError):
     """Base exception for configuration-related errors.
 
     Covers errors in settings, parameters, and user input validation.
     """
+
     pass
 
 
@@ -169,6 +188,7 @@ class PhaseConfigError(ConfigurationError):
     - Parameter value out of valid range
     - Incompatible model architecture for phase
     """
+
     pass
 
 
@@ -180,6 +200,7 @@ class WarmStartError(ConfigurationError):
     - Unknown model family
     - Invalid model name format
     """
+
     pass
 
 
@@ -187,11 +208,13 @@ class WarmStartError(ConfigurationError):
 # Abliteration Errors (2)
 # ============================================================================
 
+
 class AbliterationError(HereticError):
     """Base exception for abliteration operation errors.
 
     Covers errors during direction extraction and weight modification.
     """
+
     pass
 
 
@@ -204,6 +227,7 @@ class CircuitAblationError(AbliterationError):
     - Attention head ablation failed
     - Incompatible model architecture
     """
+
     pass
 
 
@@ -211,11 +235,13 @@ class CircuitAblationError(AbliterationError):
 # Resource Errors (2)
 # ============================================================================
 
+
 class ResourceError(HereticError):
     """Base exception for resource-related errors.
 
     Covers errors related to GPU memory, batch sizing, and system resources.
     """
+
     pass
 
 
@@ -227,6 +253,7 @@ class BatchSizeError(ResourceError):
     - Repeated OOM errors during optimization
     - Model too large for available VRAM
     """
+
     pass
 
 
@@ -234,11 +261,13 @@ class BatchSizeError(ResourceError):
 # Extraction Errors (2)
 # ============================================================================
 
+
 class ExtractionError(AbliterationError):
     """Base exception for direction extraction errors.
 
     Covers errors during refusal direction extraction methods.
     """
+
     pass
 
 
@@ -250,6 +279,7 @@ class SupervisedProbeError(ExtractionError):
     - Probe accuracy below threshold
     - Model doesn't distinguish refusal vs compliance patterns
     """
+
     pass
 
 
@@ -261,6 +291,7 @@ class ConceptConeError(ExtractionError):
     - Harmful prompts don't have distinct categories
     - Insufficient samples for clustering
     """
+
     pass
 
 
@@ -272,6 +303,18 @@ class CAAExtractionError(ExtractionError):
     - Insufficient compliance samples (< 10)
     - Model already complies or refuses everything
     """
+
+
+class SacredDirectionError(ExtractionError):
+    """Exception raised during sacred direction extraction or orthogonalization.
+
+    Common causes:
+    - Sacred direction extraction failed
+    - Orthogonalization resulted in near-zero direction
+    - Refusal direction lies within sacred direction span
+    - Sacred prompts dataset could not be loaded
+    """
+
     pass
 
 

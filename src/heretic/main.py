@@ -1,6 +1,36 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
+"""
+Main entry point for heretic abliteration.
+
+This module contains the run() function which orchestrates the full abliteration
+pipeline. The workflow is divided into logical phases that can be found in the
+heretic.phases submodule:
+
+1. **Dataset Loading** (phases.dataset_loading)
+   - Load good/bad prompts for direction extraction
+   - Load helpfulness prompts for orthogonalization
+   - Load sacred prompts for capability preservation
+
+2. **Direction Extraction** (phases.direction_extraction)
+   - Extract refusal directions via PCA or supervised probing
+   - Orthogonalize against helpfulness direction
+   - Extract and orthogonalize sacred capability directions
+
+3. **Optimization** (phases.optimization)
+   - Create/resume Optuna study
+   - Enqueue warm-start trials from model family profiles
+   - Run multi-objective optimization loop
+
+4. **Model Saving** (phases.model_saving)
+   - Save abliterated model to disk
+   - Upload to HuggingFace Hub with model card
+
+For backwards compatibility and robustness, the core logic remains in this file,
+but the phase modules provide cleaner interfaces for testing and extension.
+"""
+
 import math
 import os
 import sys
@@ -14,7 +44,6 @@ import huggingface_hub
 import optuna
 import questionary
 import torch
-import torch.nn.functional as F
 import transformers
 from accelerate.utils import (
     is_mlu_available,
@@ -27,28 +56,28 @@ from huggingface_hub import ModelCard, ModelCardData, get_token
 from huggingface_hub.errors import HfHubHTTPError
 from optuna import Trial
 from optuna.exceptions import ExperimentalWarning
-from optuna.samplers import TPESampler
-from optuna.study import StudyDirection
 from pydantic import ValidationError
 from questionary import Choice, Style
 from rich.traceback import install
 
 from .config import Settings
+from .constants import (
+    MAX_OOM_RETRIES,
+    LayerPos,
+    Memory,
+)
+from .error_tracker import error_tracker, record_suppressed_error
 from .evaluator import Evaluator
 from .exceptions import (
     AbliterationError,
     BatchSizeError,
     CAAExtractionError,
     ConceptConeError,
-    ConfigurationError,
-    DatasetError,
-    ModelError,
     ModelInferenceError,
-    NetworkTimeoutError,
     SupervisedProbeError,
-    ValidationFileError,
     WarmStartError,
 )
+from .logging import get_logger
 from .model import (
     AbliterationParameters,
     ConceptConeExtractionResult,
@@ -56,22 +85,29 @@ from .model import (
     Model,
     SupervisedExtractionResult,
 )
-from .transfer import (
-    detect_model_family,
-    get_model_profile,
-    get_warm_start_params,
-    get_warm_start_variations,
+from .phases import (
+    apply_helpfulness_orthogonalization,
+    create_study,
+    enqueue_warm_start_trials,
+    extract_refusal_directions,
+    extract_sacred_directions,
+    load_datasets,
+    run_optimization,
+    save_model_local,
+    upload_model_huggingface,
 )
+from .transfer import detect_model_family
 from .utils import (
     empty_cache,
     format_duration,
     get_gpu_memory_info,
     get_readme_intro,
     get_trial_parameters,
-    load_prompts,
     print,
 )
 from .validation import AbliterationValidator
+
+logger = get_logger(__name__)
 
 
 def run():
@@ -138,7 +174,7 @@ def run():
     # resulting in many computation graphs being compiled. Raising the limit (default = 8)
     # avoids errors from TorchDynamo assuming that something is wrong because we
     # recompile too often.
-    torch._dynamo.config.cache_size_limit = 64
+    torch._dynamo.config.cache_size_limit = Memory.DYNAMO_CACHE_SIZE_LIMIT
 
     # Silence warning spam from Transformers.
     # In my entire career I've never seen a useful warning from that library.
@@ -153,15 +189,10 @@ def run():
 
     model = Model(settings)
 
-    print()
-    print(f"Loading good prompts from [bold]{settings.good_prompts.dataset}[/]...")
-    good_prompts = load_prompts(settings.good_prompts)
-    print(f"* [bold]{len(good_prompts)}[/] prompts loaded")
-
-    print()
-    print(f"Loading bad prompts from [bold]{settings.bad_prompts.dataset}[/]...")
-    bad_prompts = load_prompts(settings.bad_prompts)
-    print(f"* [bold]{len(bad_prompts)}[/] prompts loaded")
+    # Phase 1: Load all datasets using phase module
+    datasets = load_datasets(settings)
+    good_prompts = datasets.good_prompts
+    bad_prompts = datasets.bad_prompts
 
     if settings.batch_size == 0:
         print()
@@ -188,17 +219,17 @@ def run():
                 if batch_size == 1:
                     # Even a batch size of 1 causes OOM - cannot recover
                     print()
-                    print(f"[red]GPU Out of Memory with batch size 1[/]")
+                    print("[red]GPU Out of Memory with batch size 1[/]")
                     print("[yellow]Solutions:[/]")
                     print("  1. Use smaller model or quantized version")
                     print("  2. Reduce max_response_length in config")
                     print("  3. Free up GPU memory (close other programs)")
                     raise ModelInferenceError(
-                        f"GPU out of memory even with batch_size=1. "
-                        f"Model may be too large for available GPU memory."
+                        "GPU out of memory even with batch_size=1. "
+                        "Model may be too large for available GPU memory."
                     ) from error
 
-                print(f"[yellow]GPU OOM[/] (batch too large)")
+                print("[yellow]GPU OOM[/] (batch too large)")
                 break
             except RuntimeError as error:
                 # Other runtime errors during inference
@@ -207,12 +238,14 @@ def run():
                     # Catch OOM that doesn't raise torch.cuda.OutOfMemoryError
                     if batch_size == 1:
                         print()
-                        print(f"[red]Out of Memory with batch size 1[/]")
-                        print("[yellow]Try smaller model or reduce max_response_length[/]")
+                        print("[red]Out of Memory with batch size 1[/]")
+                        print(
+                            "[yellow]Try smaller model or reduce max_response_length[/]"
+                        )
                         raise ModelInferenceError(
                             f"Out of memory with batch_size=1: {error}"
                         ) from error
-                    print(f"[yellow]OOM[/] (batch too large)")
+                    print("[yellow]OOM[/] (batch too large)")
                     break
 
                 if batch_size == 1:
@@ -263,82 +296,49 @@ def run():
         evaluator.get_score()
         return
 
-    print()
-    print("Calculating per-layer refusal directions...")
-    print("* Obtaining residuals for good prompts...")
-    good_residuals = model.get_residuals_batched(good_prompts)
-    print("* Obtaining residuals for bad prompts...")
-    bad_residuals = model.get_residuals_batched(bad_prompts)
+    # Phase 2: Extract refusal directions using phase module
+    good_residuals, bad_residuals, direction_result = extract_refusal_directions(
+        model=model,
+        good_prompts=good_prompts,
+        bad_prompts=bad_prompts,
+        settings=settings,
+    )
 
-    # Phase 1: Support multi-direction PCA extraction
-    direction_weights = settings.direction_weights  # Default fixed weights
-    if settings.use_pca_extraction and settings.n_refusal_directions > 1:
-        print(
-            f"* Extracting {settings.n_refusal_directions} refusal directions using contrastive PCA..."
+    # Unpack direction extraction results
+    refusal_directions = direction_result.refusal_directions
+    refusal_directions_multi = direction_result.refusal_directions_multi
+    use_multi_direction = direction_result.use_multi_direction
+    direction_weights = direction_result.direction_weights or settings.direction_weights
+
+    # Apply helpfulness orthogonalization if enabled
+    if (
+        settings.orthogonalize_directions
+        and datasets.helpful_prompts
+        and datasets.unhelpful_prompts
+    ):
+        direction_result = apply_helpfulness_orthogonalization(
+            model=model,
+            result=direction_result,
+            helpful_prompts=datasets.helpful_prompts,
+            unhelpful_prompts=datasets.unhelpful_prompts,
         )
-        pca_result = model.get_refusal_directions_pca(
-            good_residuals,
-            bad_residuals,
-            n_components=settings.n_refusal_directions,
-            alpha=settings.pca_alpha,
+        refusal_directions = direction_result.refusal_directions
+
+    # Sacred Direction Preservation using phase module
+    if (
+        settings.use_sacred_directions
+        and datasets.sacred_prompts
+        and datasets.sacred_baseline_prompts
+    ):
+        direction_result = extract_sacred_directions(
+            model=model,
+            result=direction_result,
+            sacred_prompts=datasets.sacred_prompts,
+            sacred_baseline_prompts=datasets.sacred_baseline_prompts,
+            settings=settings,
         )
-        refusal_directions_multi = pca_result.directions
-
-        # Compute eigenvalue-based weights if enabled
-        if settings.use_eigenvalue_weights:
-            direction_weights = pca_result.get_eigenvalue_weights(
-                method=settings.eigenvalue_weight_method,
-                temperature=settings.eigenvalue_weight_temperature,
-            )
-            print(
-                f"  * Using eigenvalue-based weights ({settings.eigenvalue_weight_method}): "
-                f"{[f'{w:.3f}' for w in direction_weights]}"
-            )
-        else:
-            print(f"  * Using fixed weights: {settings.direction_weights}")
-
-        # For compatibility, also compute mean-difference direction
-        refusal_directions = F.normalize(
-            bad_residuals.mean(dim=0) - good_residuals.mean(dim=0),
-            p=2,
-            dim=1,
-        )
-        use_multi_direction = True
-    else:
-        # Original single-direction approach
-        refusal_directions = F.normalize(
-            bad_residuals.mean(dim=0) - good_residuals.mean(dim=0),
-            p=2,
-            dim=1,
-        )
-        refusal_directions_multi = None
-        use_multi_direction = False
-
-    # Phase 5: Direction orthogonalization
-    helpfulness_direction = None
-    if settings.orthogonalize_directions:
-        print("* Extracting helpfulness direction for orthogonalization...")
-        helpful_prompts = load_prompts(settings.helpfulness_prompts)
-        unhelpful_prompts = load_prompts(settings.unhelpfulness_prompts)
-        print(f"  * Loaded {len(helpful_prompts)} helpful prompts")
-        print(f"  * Loaded {len(unhelpful_prompts)} unhelpful prompts")
-
-        helpful_residuals = model.get_residuals_batched(helpful_prompts)
-        unhelpful_residuals = model.get_residuals_batched(unhelpful_prompts)
-
-        helpfulness_direction = model.extract_helpfulness_direction(
-            helpful_residuals,
-            unhelpful_residuals,
-        )
-
-        # Orthogonalize the refusal direction
-        print("  * Orthogonalizing refusal direction against helpfulness...")
-        refusal_directions = model.orthogonalize_direction(
-            refusal_directions,
-            helpfulness_direction,
-        )
-
-        del helpful_residuals, unhelpful_residuals
+        refusal_directions = direction_result.refusal_directions
+        refusal_directions_multi = direction_result.refusal_directions_multi
 
     # NOTE: We keep good_residuals and bad_residuals in memory for reuse by
     # advanced extraction methods (supervised probing, ensemble, concept cones, CAA).
@@ -613,7 +613,6 @@ def run():
     trial_index = 0
     start_time = time.perf_counter()
     oom_count = 0
-    MAX_OOM_RETRIES = 3
 
     def objective(trial: Trial) -> tuple[float, float]:
         nonlocal trial_index
@@ -637,8 +636,8 @@ def run():
         # work with conditional or variable-range parameters.
         direction_index = trial.suggest_float(
             "direction_index",
-            0.4 * (len(model.get_layers()) - 1),
-            0.9 * (len(model.get_layers()) - 1),
+            LayerPos.DIRECTION_INDEX_MIN_FRAC * (len(model.get_layers()) - 1),
+            LayerPos.DIRECTION_INDEX_MAX_FRAC * (len(model.get_layers()) - 1),
         )
 
         if direction_scope == "per layer":
@@ -652,12 +651,14 @@ def run():
             # adjusted for future models.
             max_weight = trial.suggest_float(
                 f"{component}.max_weight",
-                0.8,
+                LayerPos.MAX_WEIGHT_MIN_FRAC
+                if hasattr(LayerPos, "MAX_WEIGHT_MIN_FRAC")
+                else 0.8,
                 1.5,
             )
             max_weight_position = trial.suggest_float(
                 f"{component}.max_weight_position",
-                0.6 * (len(model.get_layers()) - 1),
+                LayerPos.MAX_WEIGHT_POSITION_MIN_FRAC * (len(model.get_layers()) - 1),
                 len(model.get_layers()) - 1,
             )
             # For sampling purposes, min_weight is expressed as a fraction of max_weight,
@@ -671,7 +672,7 @@ def run():
             min_weight_distance = trial.suggest_float(
                 f"{component}.min_weight_distance",
                 1.0,
-                0.6 * (len(model.get_layers()) - 1),
+                LayerPos.MIN_WEIGHT_DISTANCE_MIN_FRAC * (len(model.get_layers()) - 1),
             )
 
             parameters[component] = AbliterationParameters(
@@ -707,8 +708,18 @@ def run():
             empty_cache()
             try:
                 model.reload_model()  # Reload to reset model state
-            except Exception:
-                pass  # Best-effort reload, continue with empty_cache
+            except Exception as reload_error:
+                # Track but don't fail - model state may be inconsistent
+                record_suppressed_error(
+                    error=reload_error,
+                    context="oom_recovery_model_reload",
+                    module="main",
+                    severity="warning",
+                    details={
+                        "oom_count": oom_count,
+                        "advice": "Model state may be inconsistent, subsequent trials may produce unexpected results",
+                    },
+                )
             empty_cache()
 
             mem_info = get_gpu_memory_info()
@@ -762,128 +773,34 @@ def run():
 
         return score
 
-    # Create or load study with persistent storage for resume support
-    try:
-        study = optuna.create_study(
-            study_name=settings.study_name,
-            storage=settings.storage,
-            load_if_exists=True,
-            sampler=TPESampler(
-                n_startup_trials=settings.n_startup_trials,
-                n_ei_candidates=128,
-                multivariate=True,
-            ),
-            directions=[StudyDirection.MINIMIZE, StudyDirection.MINIMIZE],
-        )
-    except OSError as e:
-        # Database file errors (locked, corrupted, disk full, etc.)
-        error_str = str(e).lower()
-        if "database is locked" in error_str or "locked" in error_str:
-            print("[red]Database is locked. Another process may be using it.[/]")
-            print("[yellow]Solutions:[/]")
-            print("  1. Wait for other process to finish")
-            print("  2. Kill other heretic processes")
-            print(f"  3. If stuck, delete: {settings.storage.replace('sqlite:///', '')}")
-            raise ConfigurationError(
-                f"Optuna database is locked. Another process may be using it."
-            ) from e
-        elif "disk" in error_str or "space" in error_str:
-            print(f"[red]Insufficient Disk Space[/]")
-            print("[yellow]Free up disk space and try again[/]")
-            raise ConfigurationError(
-                f"Insufficient disk space for Optuna database: {settings.storage}"
-            ) from e
-        elif "corrupt" in error_str:
-            print(f"[red]Database may be corrupted: {e}[/]")
-            print("[yellow]Backup and delete the .db file to start fresh.[/]")
-            raise ConfigurationError(
-                f"Optuna database corrupted: {settings.storage}"
-            ) from e
-        # Other OS errors - reraise
-        raise
-    except KeyboardInterrupt:
-        raise
-    except Exception as e:
-        # Unexpected errors (keep as safety net)
-        print(f"[red]Failed to create Optuna study: {e}[/]")
-        print("[yellow]Check storage path and permissions[/]")
-        raise ConfigurationError(
-            f"Failed to create Optuna study: {e}"
-        ) from e
+    # Phase 3: Create or load study using phase module
+    study = create_study(settings)
 
-    # Calculate remaining trials if resuming
+    # Update trial_index if resuming
     completed_trials = len(
         [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     )
-    remaining_trials = max(0, settings.n_trials - completed_trials)
-
     if completed_trials > 0:
-        print()
-        print(
-            f"[cyan]Resuming from trial {completed_trials + 1} ({completed_trials} completed trials found)[/]"
-        )
         trial_index = completed_trials
 
-    # Phase 7: Enqueue warm-start trials if enabled and no trials completed yet
-    if settings.use_warm_start_params and completed_trials == 0:
-        components = model.get_abliterable_components()
-        warm_start_params = get_warm_start_params(
-            model_name=settings.model,
-            n_layers=len(model.get_layers()),
-            components=components,
-            override_family=settings.model_family,
+    # Phase 7: Enqueue warm-start trials using phase module
+    warm_start_enqueued = enqueue_warm_start_trials(study, settings, model)
+    if (
+        settings.use_warm_start_params
+        and not warm_start_enqueued
+        and completed_trials == 0
+    ):
+        # Warm-start was requested but no profile found
+        detected = detect_model_family(settings.model)
+        raise WarmStartError(
+            f"Warm-start enabled but no profile found for model: {settings.model}. "
+            f"Detected family: {detected or 'unknown'}. "
+            f"Set --model-family to one of: llama, qwen, mistral, gemma, phi. "
+            f"Or disable use_warm_start_params to use random initialization."
         )
 
-        if warm_start_params is not None:
-            # Get detected or overridden family
-            family = settings.model_family or detect_model_family(settings.model)
-            profile = get_model_profile(settings.model, settings.model_family)
-
-            print()
-            print(f"[cyan]Warm-start enabled for model family: [bold]{family}[/][/]")
-            if profile:
-                print(f"  * Profile: {profile.description}")
-                print(
-                    f"  * Recommended max_weight_position: {profile.recommended_max_weight_position:.0%} of layers"
-                )
-                print(f"  * Typical KL divergence: {profile.typical_kl_divergence:.2f}")
-
-            # Generate variations for exploration
-            variations = get_warm_start_variations(
-                warm_start_params,
-                n_variations=settings.warm_start_n_trials,
-                n_layers=len(model.get_layers()),
-            )
-
-            print(f"  * Enqueuing {len(variations)} warm-start trials...")
-            first_component = components[0] if components else None
-            for i, params in enumerate(variations):
-                study.enqueue_trial(params)
-                if first_component:
-                    weight_key = f"{first_component}.max_weight"
-                    weight_val = params.get(weight_key, "N/A")
-                    weight_str = (
-                        f"{weight_val:.2f}"
-                        if isinstance(weight_val, (int, float))
-                        else str(weight_val)
-                    )
-                    if i == 0:
-                        print(f"    * Base trial: max_weight={weight_str}")
-                    else:
-                        print(f"    * Variation {i}: max_weight={weight_str}")
-        else:
-            detected = detect_model_family(settings.model)
-            raise WarmStartError(
-                f"Warm-start enabled but no profile found for model: {settings.model}. "
-                f"Detected family: {detected or 'unknown'}. "
-                f"Set --model-family to one of: llama, qwen, mistral, gemma, phi. "
-                f"Or disable use_warm_start_params to use random initialization."
-            )
-
-    if remaining_trials > 0:
-        study.optimize(objective, n_trials=remaining_trials)
-    else:
-        print(f"[green]All {settings.n_trials} trials already completed![/]")
+    # Run optimization loop using phase module
+    run_optimization(study, objective, settings.n_trials)
 
     best_trials = sorted(
         study.best_trials,
@@ -978,84 +895,17 @@ def run():
             auto_model_name = Path(settings.model).name
             save_directory = f"./{auto_model_name}-heretic"
 
-        print(f"Saving model to [bold]{save_directory}[/]...")
-        model.model.save_pretrained(save_directory)
-        model.tokenizer.save_pretrained(save_directory)
-        print(f"[bold green]Model saved to {save_directory}[/]")
+        # Phase 4: Save model using phase module
+        save_model_local(model, save_directory)
 
         # Auto-upload to HuggingFace if --hf-upload is specified
         if settings.hf_upload:
-            print()
-            print(f"Uploading model to HuggingFace: [bold]{settings.hf_upload}[/]...")
-            try:
-                token = get_token()
-                if not token:
-                    print(
-                        "[red]No HuggingFace token found. Set HF_TOKEN env var or run 'huggingface-cli login'[/]"
-                    )
-                else:
-                    model.model.push_to_hub(
-                        settings.hf_upload,
-                        private=settings.hf_private,
-                        token=token,
-                    )
-                    model.tokenizer.push_to_hub(
-                        settings.hf_upload,
-                        private=settings.hf_private,
-                        token=token,
-                    )
-
-                    # Upload model card if source model is from HuggingFace
-                    if not Path(settings.model).exists():
-                        card = ModelCard.load(settings.model)
-                        if card.data is None:
-                            card.data = ModelCardData()
-                        if card.data.tags is None:
-                            card.data.tags = []
-                        card.data.tags.extend(
-                            ["heretic", "uncensored", "decensored", "abliterated"]
-                        )
-                        card.text = (
-                            get_readme_intro(
-                                settings,
-                                trial,
-                                evaluator.base_refusals,
-                                evaluator.bad_prompts,
-                            )
-                            + card.text
-                        )
-                        card.push_to_hub(settings.hf_upload, token=token)
-
-                    print(f"[bold green]Model uploaded to {settings.hf_upload}[/]")
-            except HfHubHTTPError as error:
-                # HTTP errors from HuggingFace Hub
-                if error.response.status_code == 401:
-                    print(f"[red]Authentication Failed[/]")
-                    print("[yellow]Run: huggingface-cli login[/]")
-                elif error.response.status_code == 403:
-                    print(f"[red]Permission Denied: {settings.hf_upload}[/]")
-                    print("[yellow]Check repository permissions or create repository first[/]")
-                elif error.response.status_code == 404:
-                    print(f"[red]Repository Not Found: {settings.hf_upload}[/]")
-                    print("[yellow]Create repository first on HuggingFace Hub[/]")
-                else:
-                    print(f"[red]HuggingFace Hub Error: {error}[/]")
-            except OSError as error:
-                # Disk space or permission errors
-                error_msg = str(error).lower()
-                if "disk" in error_msg or "space" in error_msg:
-                    print(f"[red]Insufficient Disk Space[/]")
-                    print("[yellow]Free up space for model upload[/]")
-                else:
-                    print(f"[red]File System Error: {error}[/]")
-            except KeyboardInterrupt:
-                print()
-                print("[yellow]Upload interrupted by user[/]")
-                raise
-            except Exception as error:
-                # Unexpected errors (safety net)
-                print(f"[red]Failed to upload to HuggingFace: {error}[/]")
-                print("[yellow]Check network connection and repository permissions[/]")
+            upload_model_huggingface(
+                model=model,
+                settings=settings,
+                trial=trial,
+                evaluator=evaluator,
+            )
 
         return
 
@@ -1120,21 +970,8 @@ def run():
                         if not save_directory:
                             continue
 
-                        print("Saving model...")
-                        try:
-                            model.model.save_pretrained(save_directory)
-                            model.tokenizer.save_pretrained(save_directory)
-                            print(f"Model saved to [bold]{save_directory}[/].")
-                        except PermissionError as e:
-                            print(f"[red]Permission Denied: {save_directory}[/]")
-                            print("[yellow]Check directory permissions or choose different path[/]")
-                        except OSError as e:
-                            error_msg = str(e).lower()
-                            if "disk" in error_msg or "space" in error_msg:
-                                print(f"[red]Insufficient Disk Space[/]")
-                                print("[yellow]Free up space or choose different location[/]")
-                            else:
-                                print(f"[red]Failed to save model: {e}[/]")
+                        # Use phase module for saving
+                        save_model_local(model, save_directory)
 
                     case "Upload the model to Hugging Face":
                         # We don't use huggingface_hub.login() because that stores the token on disk,
@@ -1239,15 +1076,15 @@ def run():
             except HfHubHTTPError as error:
                 # HuggingFace Hub errors (upload, authentication, etc.)
                 if error.response.status_code == 401:
-                    print(f"[red]Authentication Failed[/]")
+                    print("[red]Authentication Failed[/]")
                     print("[yellow]Check HuggingFace token[/]")
                 elif error.response.status_code == 403:
-                    print(f"[red]Permission Denied[/]")
+                    print("[red]Permission Denied[/]")
                     print("[yellow]Check repository access permissions[/]")
                 else:
                     print(f"[red]HuggingFace Error: {error}[/]")
             except torch.cuda.OutOfMemoryError:
-                print(f"[red]GPU Out of Memory during chat[/]")
+                print("[red]GPU Out of Memory during chat[/]")
                 print("[yellow]Try shorter messages or restart chat[/]")
             except ModelInferenceError as error:
                 print(f"[red]Model Inference Error: {error}[/]")
@@ -1278,3 +1115,9 @@ def main():
             print("[red]Shutting down...[/]")
         else:
             raise
+    finally:
+        # Print suppressed error summary if any errors were tracked
+        if error_tracker.count() > 0:
+            print()
+            print("[dim]" + "=" * 50 + "[/dim]")
+            print(f"[dim]{error_tracker.get_summary()}[/dim]")

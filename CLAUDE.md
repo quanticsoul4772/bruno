@@ -121,9 +121,12 @@ Heretic now includes 7 phases of advanced abliteration improvements:
 | 7 | Warm-Start Transfer | ✅ ON | Model family profiles for faster Optuna |
 
 **Key files for advanced features:**
-- `src/heretic/model.py` - All Phase 1-7 implementations
-- `src/heretic/config.py` - 50+ configuration settings
+- `src/heretic/model.py` - All Phase 1-7 implementations + Sacred Direction Preservation
+- `src/heretic/config.py` - 50+ configuration settings with Pydantic validators
+- `src/heretic/constants.py` - Centralized magic numbers (Thresholds, LayerPos, Memory, etc.)
+- `src/heretic/phases/` - Modular pipeline phases (dataset loading, direction extraction, optimization, saving)
 - `src/heretic/transfer.py` - Model family profiles for warm-start
+- `src/heretic/exceptions.py` - 22+ custom exception types including `SacredDirectionError`
 
 ## Build and Development Commands
 
@@ -149,13 +152,27 @@ uv build
 ## Architecture
 
 ### Core Flow (`src/heretic/main.py`)
-1. Load model and tokenizer via `Model` class
-2. Load contrastive prompt datasets (good/bad) for direction calculation
-3. Auto-detect optimal batch size if `batch_size=0`
-4. Compute per-layer behavioral directions from residual activations
-5. Run Optuna optimization loop with TPESampler
-6. Present Pareto-optimal trials for user selection
-7. Allow saving/uploading/chatting with modified model
+
+The abliteration pipeline is organized into modular phases (see `src/heretic/phases/`):
+
+1. **Dataset Loading** (`phases.dataset_loading`)
+   - Load good/bad prompts via `load_datasets()`
+   - Returns `DatasetBundle` with all prompt datasets
+
+2. **Direction Extraction** (`phases.direction_extraction`)
+   - Extract refusal directions via `extract_refusal_directions()`
+   - Apply helpfulness orthogonalization via `apply_helpfulness_orthogonalization()`
+   - Extract sacred capability directions via `extract_sacred_directions()`
+   - Returns `DirectionExtractionResult` with all direction tensors
+
+3. **Optimization** (`phases.optimization`)
+   - Create/resume Optuna study via `create_study()`
+   - Enqueue warm-start trials via `enqueue_warm_start_trials()`
+   - Run optimization loop via `run_optimization()`
+
+4. **Model Saving** (`phases.model_saving`)
+   - Save locally via `save_model_local()`
+   - Upload to HuggingFace via `upload_model_huggingface()`
 
 ### Key Components
 
@@ -211,6 +228,12 @@ uv build
 
 ### Key Directories
 - `src/heretic/` - Core abliteration logic
+- `src/heretic/phases/` - Modular pipeline phases (NEW)
+  - `dataset_loading.py` - Dataset loading and bundling
+  - `direction_extraction.py` - Refusal/sacred direction extraction
+  - `optimization.py` - Optuna study management
+  - `model_saving.py` - Model persistence and upload
+- `src/heretic/constants.py` - Centralized magic numbers and thresholds (NEW)
 - `src/heretic/vast.py` - Vast.ai cloud CLI
 - `experiments/` - Behavioral direction experiments
 - `models/` - Local modified models (gitignored)
@@ -242,6 +265,24 @@ Key parameters in `config.toml`:
 - `use_concept_cones`: Category-specific directions
 - `use_caa`: Contrastive Activation Addition
 - `use_circuit_ablation`: Attention head targeting (⚠️ No GQA support)
+
+**Sacred Direction Preservation (experimental, disabled by default):**
+- `use_sacred_directions`: Orthogonalize refusal direction against capability-encoding directions to preserve model capabilities (MMLU, etc.)
+- `n_sacred_directions`: Number of sacred directions to extract (default: 5)
+- `sacred_prompts`: Dataset specification for capability prompts (default: cais/mmlu)
+- `sacred_baseline_prompts`: Dataset specification for baseline text (default: wikitext)
+- `sacred_overlap_threshold`: Warning threshold for refusal-sacred overlap (default: 0.3)
+
+**How Sacred Direction Preservation Works:**
+1. Extract "sacred" directions from capability prompts (e.g., MMLU questions) via contrastive PCA
+2. Compute overlap between refusal direction and sacred directions
+3. Orthogonalize refusal direction against ALL sacred directions
+4. Abliterate with the orthogonalized direction (mathematically cannot damage sacred capabilities)
+
+**Key Methods in `model.py`:**
+- `extract_sacred_directions()`: Extract capability-encoding directions
+- `orthogonalize_against_sacred()`: Remove sacred components from refusal direction
+- `compute_sacred_overlap()`: Measure refusal-capability overlap before orthogonalization
 
 ## Performance Optimizations
 

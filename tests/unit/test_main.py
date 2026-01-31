@@ -108,7 +108,11 @@ class TestRunGPUDetection:
             mock_model = MagicMock()
             mock_model_class.return_value = mock_model
 
-            with patch("heretic.main.load_prompts", return_value=["prompt"]):
+            with patch("heretic.main.load_datasets") as mock_load_datasets:
+                mock_datasets = MagicMock()
+                mock_datasets.good_prompts = ["prompt"]
+                mock_datasets.bad_prompts = ["bad prompt"]
+                mock_load_datasets.return_value = mock_datasets
                 with patch("heretic.main.Evaluator"):
                     run()
 
@@ -139,7 +143,11 @@ class TestRunGPUDetection:
             mock_model = MagicMock()
             mock_model_class.return_value = mock_model
 
-            with patch("heretic.main.load_prompts", return_value=["prompt"]):
+            with patch("heretic.main.load_datasets") as mock_load_datasets:
+                mock_datasets = MagicMock()
+                mock_datasets.good_prompts = ["prompt"]
+                mock_datasets.bad_prompts = ["bad prompt"]
+                mock_load_datasets.return_value = mock_datasets
                 with patch("heretic.main.Evaluator"):
                     run()
 
@@ -168,7 +176,7 @@ class TestRunBatchSizeDetermination:
             patch("heretic.main.warnings"),
             patch("heretic.main.print"),
             patch("heretic.main.Model") as mock_model_class,
-            patch("heretic.main.load_prompts") as mock_load,
+            patch("heretic.main.load_datasets") as mock_load_datasets,
             patch("heretic.main.Evaluator"),
             patch("heretic.main.time.perf_counter") as mock_time,
         ):
@@ -183,7 +191,10 @@ class TestRunBatchSizeDetermination:
             mock_model.tokenizer.encode.return_value = list(range(50))
             mock_model_class.return_value = mock_model
 
-            mock_load.return_value = ["prompt1", "prompt2"] * 10
+            mock_datasets = MagicMock()
+            mock_datasets.good_prompts = ["prompt1", "prompt2"] * 10
+            mock_datasets.bad_prompts = ["bad1", "bad2"] * 10
+            mock_load_datasets.return_value = mock_datasets
 
             # Simulate timing: 0.1s per batch
             mock_time.side_effect = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]

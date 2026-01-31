@@ -12,6 +12,11 @@ Directions cannot be transferred between models with different hidden dimensions
 
 from dataclasses import dataclass
 
+from .error_tracker import record_suppressed_error
+from .logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ModelAbliterationProfile:
@@ -120,8 +125,25 @@ def detect_model_family(model_name: str) -> str | None:
     for family, patterns in family_patterns.items():
         for pattern in patterns:
             if pattern in model_lower:
+                logger.debug(
+                    "Detected model family",
+                    model=model_name,
+                    family=family,
+                    matched_pattern=pattern,
+                )
                 return family
 
+    record_suppressed_error(
+        error=None,
+        context="detect_model_family",
+        module="transfer",
+        severity="debug",
+        details={
+            "model": model_name,
+            "checked_families": list(family_patterns.keys()),
+            "reason": "No matching family pattern found",
+        },
+    )
     return None
 
 
@@ -143,9 +165,27 @@ def get_model_profile(
         family = detect_model_family(model_name)
 
     if family is None:
+        logger.debug(
+            "No model profile available - family not detected",
+            model=model_name,
+        )
         return None
 
-    return MODEL_PROFILES.get(family)
+    profile = MODEL_PROFILES.get(family)
+    if profile is None:
+        record_suppressed_error(
+            error=None,
+            context="get_model_profile",
+            module="transfer",
+            severity="debug",
+            details={
+                "model": model_name,
+                "family": family,
+                "available_profiles": list(MODEL_PROFILES.keys()),
+                "reason": "Family not in profiles",
+            },
+        )
+    return profile
 
 
 def get_warm_start_params(
@@ -171,6 +211,17 @@ def get_warm_start_params(
     profile = get_model_profile(model_name, override_family)
 
     if profile is None:
+        record_suppressed_error(
+            error=None,
+            context="get_warm_start_params",
+            module="transfer",
+            severity="debug",
+            details={
+                "model": model_name,
+                "override_family": override_family or "(auto-detect)",
+                "reason": "No profile found for model",
+            },
+        )
         return None
 
     # Convert fractional positions to actual layer indices

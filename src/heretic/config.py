@@ -3,7 +3,7 @@
 
 from typing import Dict, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -600,6 +600,224 @@ class Settings(BaseSettings):
         default=3,
         description="Number of warm-start trials to enqueue. Uses slight variations around the recommended parameters to explore the neighborhood.",
     )
+
+    # Sacred Direction Preservation (Capability Protection)
+    use_sacred_directions: bool = Field(
+        default=False,
+        description="Orthogonalize refusal direction against capability-encoding 'sacred' directions to preserve model capabilities. Uses MMLU or custom benchmark prompts to extract directions that encode important capabilities. Experimental feature.",
+    )
+
+    n_sacred_directions: int = Field(
+        default=5,
+        description="Number of sacred (capability) directions to extract via PCA. More directions = more thorough capability protection, but diminishing returns beyond 5-10.",
+    )
+
+    sacred_prompts: DatasetSpecification = Field(
+        default_factory=lambda: DatasetSpecification(
+            dataset="cais/mmlu",
+            config="all",
+            split="validation[:200]",
+            column="question",
+        ),
+        description="Dataset of capability prompts (e.g., MMLU questions) for extracting sacred directions. These encode reasoning/knowledge capabilities to preserve.",
+    )
+
+    sacred_baseline_prompts: DatasetSpecification = Field(
+        default_factory=lambda: DatasetSpecification(
+            dataset="wikitext",
+            config="wikitext-2-raw-v1",
+            split="train[:200]",
+            column="text",
+        ),
+        description="Dataset of baseline text for contrastive sacred direction extraction. Should be generic text without strong capability signal.",
+    )
+
+    sacred_overlap_threshold: float = Field(
+        default=0.3,
+        description="Maximum allowed cosine similarity between refusal and sacred directions before warning. High overlap indicates potential capability damage from ablation.",
+    )
+
+    # Pydantic validators for range validation
+    @field_validator("n_trials")
+    @classmethod
+    def validate_n_trials(cls, v: int) -> int:
+        """Ensure n_trials is positive."""
+        if v <= 0:
+            raise ValueError("n_trials must be greater than 0")
+        return v
+
+    @field_validator("batch_size")
+    @classmethod
+    def validate_batch_size(cls, v: int) -> int:
+        """Ensure batch_size is non-negative (0 = auto)."""
+        if v < 0:
+            raise ValueError("batch_size must be >= 0 (0 = auto-detect)")
+        return v
+
+    @field_validator("max_batch_size")
+    @classmethod
+    def validate_max_batch_size(cls, v: int) -> int:
+        """Ensure max_batch_size is positive."""
+        if v <= 0:
+            raise ValueError("max_batch_size must be greater than 0")
+        return v
+
+    @field_validator("n_refusal_directions")
+    @classmethod
+    def validate_n_refusal_directions(cls, v: int) -> int:
+        """Ensure n_refusal_directions is positive."""
+        if v <= 0:
+            raise ValueError("n_refusal_directions must be greater than 0")
+        return v
+
+    @field_validator("n_sacred_directions")
+    @classmethod
+    def validate_n_sacred_directions(cls, v: int) -> int:
+        """Ensure n_sacred_directions is positive."""
+        if v <= 0:
+            raise ValueError("n_sacred_directions must be greater than 0")
+        return v
+
+    @field_validator("sacred_overlap_threshold")
+    @classmethod
+    def validate_sacred_overlap_threshold(cls, v: float) -> float:
+        """Ensure sacred_overlap_threshold is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("sacred_overlap_threshold must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("activation_target_percentile")
+    @classmethod
+    def validate_activation_target_percentile(cls, v: float) -> float:
+        """Ensure activation_target_percentile is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("activation_target_percentile must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("activation_calibration_layer_frac")
+    @classmethod
+    def validate_activation_calibration_layer_frac(cls, v: float) -> float:
+        """Ensure activation_calibration_layer_frac is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(
+                "activation_calibration_layer_frac must be between 0.0 and 1.0"
+            )
+        return v
+
+    @field_validator("min_probe_accuracy")
+    @classmethod
+    def validate_min_probe_accuracy(cls, v: float) -> float:
+        """Ensure min_probe_accuracy is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("min_probe_accuracy must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("neural_detection_threshold")
+    @classmethod
+    def validate_neural_detection_threshold(cls, v: float) -> float:
+        """Ensure neural_detection_threshold is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("neural_detection_threshold must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("caa_addition_strength")
+    @classmethod
+    def validate_caa_addition_strength(cls, v: float) -> float:
+        """Ensure caa_addition_strength is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("caa_addition_strength must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("caa_max_overlap")
+    @classmethod
+    def validate_caa_max_overlap(cls, v: float) -> float:
+        """Ensure caa_max_overlap is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("caa_max_overlap must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("circuit_importance_threshold")
+    @classmethod
+    def validate_circuit_importance_threshold(cls, v: float) -> float:
+        """Ensure circuit_importance_threshold is in valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("circuit_importance_threshold must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("n_concept_cones")
+    @classmethod
+    def validate_n_concept_cones(cls, v: int) -> int:
+        """Ensure n_concept_cones is positive."""
+        if v <= 0:
+            raise ValueError("n_concept_cones must be greater than 0")
+        return v
+
+    @field_validator("min_cone_size")
+    @classmethod
+    def validate_min_cone_size(cls, v: int) -> int:
+        """Ensure min_cone_size is positive."""
+        if v <= 0:
+            raise ValueError("min_cone_size must be greater than 0")
+        return v
+
+    @field_validator("n_refusal_circuits")
+    @classmethod
+    def validate_n_refusal_circuits(cls, v: int) -> int:
+        """Ensure n_refusal_circuits is positive."""
+        if v <= 0:
+            raise ValueError("n_refusal_circuits must be greater than 0")
+        return v
+
+    @field_validator("iterative_rounds")
+    @classmethod
+    def validate_iterative_rounds(cls, v: int) -> int:
+        """Ensure iterative_rounds is at least 1."""
+        if v < 1:
+            raise ValueError("iterative_rounds must be at least 1")
+        return v
+
+    @field_validator("kl_divergence_tokens")
+    @classmethod
+    def validate_kl_divergence_tokens(cls, v: int) -> int:
+        """Ensure kl_divergence_tokens is positive."""
+        if v <= 0:
+            raise ValueError("kl_divergence_tokens must be greater than 0")
+        return v
+
+    @model_validator(mode="after")
+    def validate_ensemble_weights(self) -> "Settings":
+        """Ensure ensemble weights sum to approximately 1.0."""
+        total = self.ensemble_weight_probe + self.ensemble_weight_pca
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(
+                f"ensemble_weight_probe ({self.ensemble_weight_probe}) + "
+                f"ensemble_weight_pca ({self.ensemble_weight_pca}) = {total}, "
+                f"but should sum to 1.0"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_layer_profiles(self) -> "Settings":
+        """Validate layer range profiles have valid ranges."""
+        for i, profile in enumerate(self.layer_range_profiles):
+            if not 0.0 <= profile.range_start <= 1.0:
+                raise ValueError(
+                    f"layer_range_profiles[{i}].range_start must be between 0.0 and 1.0"
+                )
+            if not 0.0 <= profile.range_end <= 1.0:
+                raise ValueError(
+                    f"layer_range_profiles[{i}].range_end must be between 0.0 and 1.0"
+                )
+            if profile.range_start >= profile.range_end:
+                raise ValueError(
+                    f"layer_range_profiles[{i}].range_start ({profile.range_start}) "
+                    f"must be less than range_end ({profile.range_end})"
+                )
+            if profile.weight_multiplier < 0:
+                raise ValueError(
+                    f"layer_range_profiles[{i}].weight_multiplier must be non-negative"
+                )
+        return self
 
     # "Model" refers to the Pydantic model of the settings class here,
     # not to the language model. The field must have this exact name.

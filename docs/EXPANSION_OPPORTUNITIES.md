@@ -301,10 +301,15 @@ refusal_direction = orthogonalize_against_sacred(refusal_dir, sacred_directions)
 
 ## Implementation Priority Recommendations
 
+**Completed:**
+1. ✅ Sacred direction preservation (3-4 days, +20-30%) - **IMPLEMENTED v1.2.0**
+   - `model.extract_sacred_directions()`, `model.orthogonalize_against_sacred()`
+   - Config: `use_sacred_directions`, `n_sacred_directions`, `sacred_prompts`
+
 **Start Here (Next Sprint)**:
-1. ✅ Information-theoretic direction selection (2-3 days, +10-20%)
-2. ✅ Hierarchical behavior profiles (3-4 days, +15-25%)
-3. ✅ Sacred direction preservation (3-4 days, +20-30%)
+1. ⏳ Information-theoretic direction selection (2-3 days, +10-20%)
+2. ⏳ Hierarchical behavior profiles (3-4 days, +15-25%)
+3. ⏳ MDL-based direction count (2 days, +5-10%)
 
 **Research Phase (Next Month)**:
 4. Causal mediation analysis (1-2 weeks, +15-25%)

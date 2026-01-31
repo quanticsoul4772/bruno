@@ -5,6 +5,11 @@ Heretic Chat - A sophisticated chat interface for abliterated models
 import gc
 import json
 import logging
+import os
+import sys
+
+# Add parent directory to path for imports when running as script
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import re
 from datetime import datetime
 from pathlib import Path
@@ -408,6 +413,7 @@ def get_gpu_memory_info() -> dict[str, float] | None:
         or None if CUDA is not available.
     """
     if not torch.cuda.is_available():
+        logger.debug("GPU memory info unavailable - CUDA not available")
         return None
 
     try:
@@ -427,7 +433,7 @@ def get_gpu_memory_info() -> dict[str, float] | None:
             "percent_used": percent_used,
         }
     except Exception as e:
-        logger.warning(f"Failed to get GPU memory info: {e}")
+        logger.debug(f"GPU memory info query failed: {type(e).__name__}: {e}")
         return None
 
 

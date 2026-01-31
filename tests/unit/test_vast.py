@@ -712,7 +712,12 @@ class TestRunSSHCommand:
         result = run_ssh_command(mock_conn, "nvidia-smi")
 
         assert result == "command output"
-        mock_conn.run.assert_called_once_with("nvidia-smi", hide=True, warn=True)
+        # The command is wrapped with timeout for reliability
+        mock_conn.run.assert_called_once()
+        call_args = mock_conn.run.call_args
+        assert "nvidia-smi" in call_args[0][0]  # Command is in the wrapped string
+        assert call_args[1]["hide"] is True
+        assert call_args[1]["warn"] is True
 
     def test_run_ssh_command_failure(self):
         """Test handling of failed SSH command."""

@@ -139,6 +139,7 @@ class TestLoadPrompts:
         import pytest
 
         from heretic.config import DatasetSpecification
+        from heretic.exceptions import DatasetConfigError
         from heretic.utils import load_prompts
 
         spec = DatasetSpecification(
@@ -152,7 +153,7 @@ class TestLoadPrompts:
             mock_path.return_value.exists.return_value = False
 
             with pytest.raises(
-                ValueError, match="C4 dataset requires config parameter"
+                DatasetConfigError, match="C4 dataset requires config parameter"
             ):
                 load_prompts(spec)
 
@@ -161,6 +162,7 @@ class TestLoadPrompts:
         import pytest
 
         from heretic.config import DatasetSpecification
+        from heretic.exceptions import DatasetConfigError
         from heretic.utils import load_prompts
 
         spec = DatasetSpecification(
@@ -174,15 +176,17 @@ class TestLoadPrompts:
             mock_path.return_value.exists.return_value = False
 
             with pytest.raises(
-                ValueError, match="C4 dataset requires explicit sample count"
+                DatasetConfigError, match="C4 dataset requires explicit sample count"
             ):
                 load_prompts(spec)
 
     def test_load_prompts_c4_stream_failure(self):
         """Test that streaming failures raise clear errors."""
         import pytest
+        from requests.exceptions import ConnectionError as RequestsConnectionError
 
         from heretic.config import DatasetSpecification
+        from heretic.exceptions import NetworkTimeoutError
         from heretic.utils import load_prompts
 
         spec = DatasetSpecification(
@@ -195,12 +199,17 @@ class TestLoadPrompts:
         with patch("heretic.utils.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
 
-            with patch(
-                "heretic.utils.load_dataset",
-                side_effect=ConnectionError("Network down"),
-            ):
-                with pytest.raises(RuntimeError, match="Failed to stream C4 dataset"):
-                    load_prompts(spec)
+            # Mock time.sleep to avoid delays during retry loop
+            with patch("heretic.utils.time.sleep"):
+                # Use requests.exceptions.ConnectionError, not builtins.ConnectionError
+                with patch(
+                    "heretic.utils.load_dataset",
+                    side_effect=RequestsConnectionError("Network down"),
+                ):
+                    with pytest.raises(
+                        NetworkTimeoutError, match="Network error after"
+                    ):
+                        load_prompts(spec)
 
     def test_load_prompts_c4_stream_exhausted(self):
         """Test that early stream exhaustion raises error."""
@@ -227,7 +236,7 @@ class TestLoadPrompts:
             with patch("heretic.utils.Path") as mock_path:
                 mock_path.return_value.exists.return_value = False
 
-                with pytest.raises(ValueError, match="C4 stream exhausted early"):
+                with pytest.raises(ValueError, match="Stream exhausted early"):
                     load_prompts(spec)
 
     def test_load_prompts_c4_stream_iteration_error(self):
@@ -257,7 +266,9 @@ class TestLoadPrompts:
             with patch("heretic.utils.Path") as mock_path:
                 mock_path.return_value.exists.return_value = False
 
-                with pytest.raises(RuntimeError, match="Failed to stream C4 examples"):
+                # The ConnectionError during iteration is not caught by the retry logic
+                # so it propagates as-is
+                with pytest.raises(ConnectionError, match="Network interruption"):
                     load_prompts(spec)
 
 

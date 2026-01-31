@@ -983,7 +983,8 @@ class TestPCAExtractionResult:
         assert weights_high_temp[1] > weights_low_temp[1]
 
     def test_get_eigenvalue_weights_invalid_method(self):
-        """Test that invalid method raises ValueError."""
+        """Test that invalid method raises ConfigurationError."""
+        from heretic.exceptions import ConfigurationError
         from heretic.model import PCAExtractionResult
 
         directions = torch.randn(4, 3, 64)
@@ -991,7 +992,9 @@ class TestPCAExtractionResult:
 
         result = PCAExtractionResult(directions=directions, eigenvalues=eigenvalues)
 
-        with pytest.raises(ValueError, match="Unknown eigenvalue weight method"):
+        with pytest.raises(
+            ConfigurationError, match="Unknown eigenvalue weight method"
+        ):
             result.get_eigenvalue_weights(method="invalid_method")
 
 

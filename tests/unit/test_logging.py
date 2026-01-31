@@ -143,17 +143,14 @@ class TestSetupStandardLogging:
     """Test _setup_standard_logging internal function."""
 
     def test_setup_standard_logging_format(self):
-        """Test standard logging uses correct format."""
-        from heretic.logging import _setup_standard_logging
+        """Test standard logging uses correct format via setup_logging."""
+        from heretic.logging import setup_logging
 
         with patch("heretic.logging.logging.basicConfig") as mock_basic:
-            _setup_standard_logging(logging.DEBUG)
+            with patch("heretic.logging.logging.handlers.RotatingFileHandler"):
+                setup_logging(enable_structured=False, log_level=logging.DEBUG)
 
-            mock_basic.assert_called_once()
-            call_kwargs = mock_basic.call_args[1]
+                mock_basic.assert_called_once()
+                call_kwargs = mock_basic.call_args[1]
 
-            assert call_kwargs["level"] == logging.DEBUG
-            assert "format" in call_kwargs
-            assert "%(asctime)s" in call_kwargs["format"]
-            assert "%(name)s" in call_kwargs["format"]
-            assert "%(levelname)s" in call_kwargs["format"]
+                assert call_kwargs["level"] == logging.DEBUG

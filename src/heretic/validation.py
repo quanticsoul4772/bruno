@@ -19,14 +19,17 @@ from typing import TYPE_CHECKING
 
 from datasets import load_dataset
 
+from .error_tracker import record_suppressed_error
 from .exceptions import ValidationFileError
+from .logging import get_logger
 from .utils import print
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from .config import Settings
     from .evaluator import Evaluator
     from .model import Model
-
 
 # Default MMLU categories for lightweight evaluation
 # These cover diverse reasoning domains without being too slow
@@ -133,7 +136,7 @@ class ValidationReport:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError as e:
-            print(f"[red]Permission Denied: Cannot create directory[/]")
+            print("[red]Permission Denied: Cannot create directory[/]")
             print(f"[yellow]Path: {path.parent}[/]")
             print("[yellow]Solutions:[/]")
             print("  1. Check directory permissions")
@@ -145,27 +148,38 @@ class ValidationReport:
         except OSError as e:
             error_msg = str(e).lower()
             if "disk" in error_msg or "space" in error_msg or "storage" in error_msg:
-                print(f"[red]Insufficient Disk Space[/]")
+                print("[red]Insufficient Disk Space[/]")
                 print("[yellow]Solutions:[/]")
                 print("  1. Free up disk space")
                 print("  2. Choose different output directory")
                 raise ValidationFileError(
                     f"Insufficient disk space to create directory: {path.parent}"
                 ) from e
-            raise ValidationFileError(f"Failed to create directory: {path.parent}") from e
+            raise ValidationFileError(
+                f"Failed to create directory: {path.parent}"
+            ) from e
 
         # Check disk space (need ~1MB for JSON report)
         try:
-            stat = os.statvfs(path.parent) if hasattr(os, 'statvfs') else None
+            stat = os.statvfs(path.parent) if hasattr(os, "statvfs") else None
             if stat and (stat.f_bavail * stat.f_frsize) < 1_000_000:  # < 1MB
-                print(f"[red]Insufficient Disk Space (< 1MB available)[/]")
+                print("[red]Insufficient Disk Space (< 1MB available)[/]")
                 print("[yellow]Free up space before saving report[/]")
                 raise ValidationFileError(
                     f"Insufficient disk space to save report: {path}"
                 )
-        except AttributeError:
+        except AttributeError as e:
             # statvfs not available on Windows - skip check
-            pass
+            record_suppressed_error(
+                error=e,
+                context="check_disk_space",
+                module="validation",
+                severity="debug",
+                details={
+                    "path": str(path),
+                    "reason": "statvfs not available (Windows)",
+                },
+            )
 
         # Atomic write: write to temp file, then rename
         # This ensures we never have a partial/corrupted file
@@ -174,13 +188,11 @@ class ValidationReport:
         try:
             # Create temp file in same directory for atomic rename
             temp_fd, temp_path = tempfile.mkstemp(
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                suffix=".tmp"
+                dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
             )
 
             # Write JSON to temp file
-            with os.fdopen(temp_fd, 'w') as f:
+            with os.fdopen(temp_fd, "w") as f:
                 temp_fd = None  # fdopen took ownership
                 json.dump(self.to_dict(), f, indent=2)
 
@@ -188,19 +200,17 @@ class ValidationReport:
             Path(temp_path).replace(path)
 
         except PermissionError as e:
-            print(f"[red]Permission Denied: Cannot write file[/]")
+            print("[red]Permission Denied: Cannot write file[/]")
             print(f"[yellow]Path: {path}[/]")
             print("[yellow]Solutions:[/]")
             print("  1. Check file permissions")
             print("  2. Close any programs using this file")
             print("  3. Try a different output path")
-            raise ValidationFileError(
-                f"Permission denied writing file: {path}"
-            ) from e
+            raise ValidationFileError(f"Permission denied writing file: {path}") from e
         except OSError as e:
             error_msg = str(e).lower()
             if "disk" in error_msg or "space" in error_msg or "storage" in error_msg:
-                print(f"[red]Disk Full: Cannot write file[/]")
+                print("[red]Disk Full: Cannot write file[/]")
                 print("[yellow]Free up disk space and try again[/]")
                 raise ValidationFileError(
                     f"Disk full while writing file: {path}"
@@ -208,7 +218,7 @@ class ValidationReport:
             raise ValidationFileError(f"Failed to write file: {path}") from e
         except (TypeError, ValueError) as e:
             # JSON serialization error
-            print(f"[red]Serialization Error: Cannot convert report to JSON[/]")
+            print("[red]Serialization Error: Cannot convert report to JSON[/]")
             print(f"[yellow]Error: {e}[/]")
             raise ValidationFileError(
                 f"Failed to serialize validation report to JSON: {e}"
@@ -218,13 +228,25 @@ class ValidationReport:
             if temp_fd is not None:
                 try:
                     os.close(temp_fd)
-                except OSError:
-                    pass
+                except OSError as cleanup_error:
+                    record_suppressed_error(
+                        error=cleanup_error,
+                        context="save_cleanup_temp",
+                        module="validation",
+                        severity="debug",
+                        details={"temp_path": str(temp_path)},
+                    )
             if temp_path and Path(temp_path).exists():
                 try:
                     Path(temp_path).unlink()
-                except OSError:
-                    pass
+                except OSError as cleanup_error:
+                    record_suppressed_error(
+                        error=cleanup_error,
+                        context="save_cleanup_temp",
+                        module="validation",
+                        severity="debug",
+                        details={"temp_path": str(temp_path)},
+                    )
 
     @classmethod
     def load(cls, path: str | Path) -> "ValidationReport":
@@ -238,27 +260,23 @@ class ValidationReport:
             print("  1. Check file path spelling")
             print("  2. Verify file hasn't been moved or deleted")
             print("  3. Check current working directory")
-            raise ValidationFileError(
-                f"Validation report not found: {path}"
-            )
+            raise ValidationFileError(f"Validation report not found: {path}")
 
         # Check file is readable
         if not os.access(path, os.R_OK):
-            print(f"[red]Permission Denied: Cannot read file[/]")
+            print("[red]Permission Denied: Cannot read file[/]")
             print(f"[yellow]Path: {path}[/]")
             print("[yellow]Solutions:[/]")
             print("  1. Check file permissions")
             print("  2. Run with appropriate permissions")
-            raise ValidationFileError(
-                f"Permission denied reading file: {path}"
-            )
+            raise ValidationFileError(f"Permission denied reading file: {path}")
 
         # Load and parse JSON
         try:
             with open(path) as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
-            print(f"[red]Corrupted File: Invalid JSON[/]")
+            print("[red]Corrupted File: Invalid JSON[/]")
             print(f"[yellow]Path: {path}[/]")
             print(f"[yellow]Error at line {e.lineno}, column {e.colno}:[/]")
             print(f"  {e.msg}")
@@ -271,7 +289,7 @@ class ValidationReport:
                 f"column {e.colno}: {e.msg}"
             ) from e
         except UnicodeDecodeError as e:
-            print(f"[red]Encoding Error: Cannot decode file[/]")
+            print("[red]Encoding Error: Cannot decode file[/]")
             print(f"[yellow]Path: {path}[/]")
             print("[yellow]File may be corrupted or in wrong format[/]")
             raise ValidationFileError(
@@ -282,7 +300,7 @@ class ValidationReport:
         required_fields = ["model_name", "baseline", "post_abliteration"]
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
-            print(f"[red]Invalid Report: Missing required fields[/]")
+            print("[red]Invalid Report: Missing required fields[/]")
             print(f"[yellow]Path: {path}[/]")
             print(f"[yellow]Missing fields: {missing_fields}[/]")
             print("[yellow]Solutions:[/]")
@@ -296,7 +314,7 @@ class ValidationReport:
         try:
             baseline = ValidationMetrics(**data["baseline"])
         except (TypeError, KeyError) as e:
-            print(f"[red]Invalid Baseline Metrics[/]")
+            print("[red]Invalid Baseline Metrics[/]")
             print(f"[yellow]Error: {e}[/]")
             print("[yellow]Regenerate validation report[/]")
             raise ValidationFileError(
@@ -310,7 +328,7 @@ class ValidationReport:
                 else None
             )
         except (TypeError, KeyError) as e:
-            print(f"[red]Invalid Post-Abliteration Metrics[/]")
+            print("[red]Invalid Post-Abliteration Metrics[/]")
             print(f"[yellow]Error: {e}[/]")
             print("[yellow]Regenerate validation report[/]")
             raise ValidationFileError(
@@ -328,7 +346,7 @@ class ValidationReport:
                 report.compute_improvements()
             return report
         except Exception as e:
-            print(f"[red]Failed to Create Validation Report[/]")
+            print("[red]Failed to Create Validation Report[/]")
             print(f"[yellow]Error: {e}[/]")
             raise ValidationFileError(
                 f"Failed to create validation report from file: {e}"
@@ -427,8 +445,17 @@ class MMLUEvaluator:
 
         # If response is very short (just the answer), return None if not found
         if len(response) <= 3:
+            logger.debug(
+                "MMLU answer extraction failed - no valid answer found",
+                response_preview=response[:50] if response else "(empty)",
+            )
             return None
 
+        logger.debug(
+            "MMLU answer extraction failed - response too long without clear answer",
+            response_length=len(response),
+            response_preview=response[:50],
+        )
         return None
 
     def evaluate_category(self, category: str) -> MMLUResult:

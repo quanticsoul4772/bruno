@@ -27,7 +27,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .exceptions import CloudError, ConfigurationError, SSHError
+from .exceptions import ConfigurationError, SSHError
+from .logging import get_logger
+
+logger = get_logger(__name__)
 
 # Lazy imports for fabric to avoid import errors if not installed
 try:
@@ -266,14 +269,25 @@ def get_instances(config: VastConfig) -> list[dict]:
     """Get list of Vast.ai instances."""
     code, stdout, stderr = run_vastai_cmd(["show", "instances", "--raw"], config)
     if code != 0:
+        logger.debug(
+            "get_instances API call failed",
+            exit_code=code,
+            stderr=stderr[:200] if stderr else None,
+        )
         if stderr:
             console.print(f"[red]API Error: {stderr}[/]")
         return []
     if not stdout.strip():
+        logger.debug("get_instances returned empty response")
         return []
     try:
         return json.loads(stdout)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.debug(
+            "get_instances JSON parse error",
+            error=str(e),
+            response_preview=stdout[:200] if stdout else None,
+        )
         console.print("[yellow]Warning: Could not parse API response[/]")
         return []
 
@@ -284,11 +298,19 @@ def get_running_instance(config: VastConfig) -> Optional[dict]:
     if not instances:
         # Debug: show what CLI we're using
         cmd_prefix = find_vastai_cli()
+        logger.debug(
+            "No instances found",
+            cli_command=" ".join(cmd_prefix),
+        )
         console.print(f"[dim]CLI: {' '.join(cmd_prefix)}[/]")
         return None
     for inst in instances:
         if inst.get("actual_status") == "running" or inst.get("status") == "running":
             return inst
+    logger.debug(
+        "No running instance found, returning first instance",
+        instance_id=instances[0].get("id") if instances else None,
+    )
     return instances[0] if instances else None
 
 
@@ -311,6 +333,12 @@ def get_ssh_info(
             console.print(f"[dim]SSH URL stderr: {stderr.strip()}[/]")
 
     if code != 0:
+        logger.debug(
+            "get_ssh_info failed",
+            instance_id=instance_id,
+            exit_code=code,
+            stderr=stderr[:200] if stderr else None,
+        )
         if verbose or stderr:
             console.print(f"[red]Failed to get SSH URL for instance {instance_id}[/]")
             if stderr:
@@ -340,6 +368,11 @@ def get_ssh_info(
     if match:
         return match.group(2), int(match.group(3))
 
+    logger.debug(
+        "Could not parse SSH URL format",
+        instance_id=instance_id,
+        raw_output=stdout.strip()[:200] if stdout else None,
+    )
     if verbose:
         console.print(
             f"[yellow]Warning: Could not parse SSH URL format: {stdout.strip()}[/]"
@@ -350,11 +383,16 @@ def get_ssh_info(
 def get_connection(instance_id: str, config: VastConfig) -> Optional["Connection"]:
     """Create a Fabric SSH connection to the instance."""
     if not FABRIC_AVAILABLE:
+        logger.debug("Fabric library not available for SSH connection")
         console.print("[red]Error: fabric not installed. Run: pip install fabric[/]")
         return None
 
     ssh_info = get_ssh_info(instance_id, config)
     if not ssh_info:
+        logger.debug(
+            "Cannot create connection - SSH info unavailable",
+            instance_id=instance_id,
+        )
         console.print("[red]Error: Could not get SSH info for instance[/]")
         return None
 
@@ -479,9 +517,7 @@ def validate_instance_id(instance_id: int) -> int:
             f"Instance ID must be an integer, got: {type(instance_id).__name__}"
         )
     if instance_id <= 0:
-        raise ConfigurationError(
-            f"Instance ID must be positive, got: {instance_id}"
-        )
+        raise ConfigurationError(f"Instance ID must be positive, got: {instance_id}")
     if instance_id > 999999999:  # Reasonable upper bound
         raise ConfigurationError(
             f"Instance ID too large (max 999999999), got: {instance_id}"
@@ -512,9 +548,7 @@ def validate_model_name(model_name: str) -> str:
 
     # Check for absolute paths (security risk)
     if model_name.startswith("/") or (len(model_name) > 1 and model_name[1] == ":"):
-        raise ConfigurationError(
-            "Invalid model name: absolute paths not allowed"
-        )
+        raise ConfigurationError("Invalid model name: absolute paths not allowed")
 
     # Check for shell metacharacters that could enable command injection
     dangerous_chars = [";", "|", "&", "$", "`", "\n", "\r", "<", ">"]
@@ -533,7 +567,9 @@ def validate_model_name(model_name: str) -> str:
     return model_name
 
 
-def validate_path(path: str, must_exist: bool = False, must_be_dir: bool = False) -> Path:
+def validate_path(
+    path: str, must_exist: bool = False, must_be_dir: bool = False
+) -> Path:
     """Validate and sanitize file path to prevent traversal attacks.
 
     Args:
@@ -558,9 +594,7 @@ def validate_path(path: str, must_exist: bool = False, must_be_dir: bool = False
 
     # Check for path traversal attempts
     if ".." in path:
-        raise ConfigurationError(
-            "Invalid path: path traversal blocked (contains '..')"
-        )
+        raise ConfigurationError("Invalid path: path traversal blocked (contains '..')")
 
     # Validate existence if required
     if must_exist and not path_obj.exists():
@@ -590,9 +624,7 @@ def validate_gpu_tier(tier: str) -> str:
 
     if tier not in GPU_TIERS:
         available = ", ".join(GPU_TIERS.keys())
-        raise ConfigurationError(
-            f"Invalid GPU tier: {tier}. Available: {available}"
-        )
+        raise ConfigurationError(f"Invalid GPU tier: {tier}. Available: {available}")
 
     return tier
 
@@ -614,13 +646,9 @@ def validate_disk_size(disk_gb: int) -> int:
             f"Disk size must be an integer, got: {type(disk_gb).__name__}"
         )
     if disk_gb < 50:
-        raise ConfigurationError(
-            f"Disk size too small (min 50GB), got: {disk_gb}GB"
-        )
+        raise ConfigurationError(f"Disk size too small (min 50GB), got: {disk_gb}GB")
     if disk_gb > 10000:  # 10TB reasonable upper bound
-        raise ConfigurationError(
-            f"Disk size too large (max 10000GB), got: {disk_gb}GB"
-        )
+        raise ConfigurationError(f"Disk size too large (max 10000GB), got: {disk_gb}GB")
     return disk_gb
 
 
@@ -896,7 +924,9 @@ def setup_instance(ctx, instance_id: Optional[str]):
         validate_instance_id(instance_id_int)
         instance_id = str(instance_id_int)  # Use validated value
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -917,22 +947,24 @@ def setup_instance(ctx, instance_id: Optional[str]):
         try:
             conn.open()
         except TimeoutError as e:
-            console.print(f"[red]SSH Connection Timeout[/]")
+            console.print("[red]SSH Connection Timeout[/]")
             console.print("[yellow]Solutions:[/]")
             console.print("  1. Check instance is running (heretic-vast list)")
             console.print("  2. Verify instance SSH port is accessible")
             console.print("  3. Check network connection")
             raise SSHError(f"SSH connection timeout to instance {instance_id}") from e
         except PermissionError as e:
-            console.print(f"[red]SSH Authentication Failed[/]")
+            console.print("[red]SSH Authentication Failed[/]")
             console.print("[yellow]Check SSH key permissions and configuration[/]")
-            raise SSHError(f"SSH authentication failed to instance {instance_id}") from e
+            raise SSHError(
+                f"SSH authentication failed to instance {instance_id}"
+            ) from e
         except ConnectionRefusedError as e:
-            console.print(f"[red]Connection Refused[/]")
+            console.print("[red]Connection Refused[/]")
             console.print("[yellow]Instance may not be ready yet - wait and retry[/]")
             raise SSHError(f"Connection refused to instance {instance_id}") from e
         except EOFError as e:
-            console.print(f"[red]SSH Connection Closed Unexpectedly[/]")
+            console.print("[red]SSH Connection Closed Unexpectedly[/]")
             console.print("[yellow]Instance may have stopped or network issue[/]")
             raise SSHError(f"SSH connection closed to instance {instance_id}") from e
         except KeyboardInterrupt:
@@ -941,7 +973,9 @@ def setup_instance(ctx, instance_id: Optional[str]):
             # Safety net for unexpected SSH errors
             console.print(f"[red]SSH connection failed: {e}[/]")
             console.print("[yellow]Check instance status and network[/]")
-            raise SSHError(f"SSH connection failed to instance {instance_id}: {e}") from e
+            raise SSHError(
+                f"SSH connection failed to instance {instance_id}: {e}"
+            ) from e
 
         status.update("[bold green]Installing git...")
         run_ssh_command(
@@ -1017,7 +1051,9 @@ def run_abliteration(ctx, model: str, instance_id: Optional[str]):
         validate_instance_id(instance_id_int)
         instance_id = str(instance_id_int)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1091,7 +1127,9 @@ def exec_command(ctx, command: str, instance_id: Optional[str]):
         validate_instance_id(instance_id_int)
         instance_id = str(instance_id_int)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1127,7 +1165,9 @@ def show_status(ctx, instance_id: Optional[str]):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1191,7 +1231,9 @@ def show_progress(ctx, instance_id: Optional[str]):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1274,7 +1316,9 @@ def watch_dashboard(ctx, instance_id: Optional[str], interval: int):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1472,7 +1516,9 @@ def list_models(ctx, instance_id: Optional[str]):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1546,7 +1592,9 @@ def download_model(
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1681,7 +1729,9 @@ def stop_instance(ctx, instance_id: Optional[str]):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1723,7 +1773,9 @@ def start_instance(ctx, instance_id: Optional[str]):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1749,7 +1801,9 @@ def terminate_instance(ctx, instance_id: str):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")
@@ -1790,7 +1844,9 @@ def connect_ssh(ctx, instance_id: Optional[str]):
     try:
         instance_id = validate_and_convert_instance_id(instance_id)
     except ValueError:
-        console.print(f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]")
+        console.print(
+            f"[red]Invalid instance ID: must be a number, got '{instance_id}'[/]"
+        )
         return
     except ConfigurationError as e:
         console.print(f"[red]Validation Error: {e}[/]")

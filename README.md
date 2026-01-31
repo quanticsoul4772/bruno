@@ -36,6 +36,7 @@ The technique works for any behavior with distinguishable activation patterns:
 - Contrastive Activation Addition (CAA) for combined removal + addition
 - Circuit-level ablation targeting specific attention heads
 - Warm-start parameter transfer using model family profiles
+- **Sacred Direction Preservation** - Orthogonalize against capability directions (MMLU) to protect model abilities
 
 **Performance Optimizations:**
 - GPU-accelerated PCA (15-20x faster than CPU, ~5 min for 32B models)
@@ -144,6 +145,7 @@ docker run --gpus all -e HF_TOKEN=your_token -it quanticsoul4772/heretic \
 --use-caa                         # Contrastive Activation Addition (default: false)
 --use-circuit-ablation            # Attention head targeting (default: false, no GQA)
 --use-warm-start-params           # Model family warm-start (default: true)
+--use-sacred-directions           # Preserve capabilities via MMLU directions (default: false)
 ```
 
 ### Configuration File
@@ -208,6 +210,22 @@ heretic --model meta-llama/Llama-3.1-8B-Instruct
 
 See [experiments/](experiments/) for experimental behavioral directions.
 
+### Sacred Direction Preservation (NEW)
+
+Protect model capabilities during abliteration by orthogonalizing against capability-encoding directions:
+
+```bash
+heretic <model> --use-sacred-directions true --n-sacred-directions 5
+```
+
+**How it works:**
+1. Extract "sacred" directions from MMLU questions (encode reasoning capabilities)
+2. Measure overlap between refusal direction and sacred directions
+3. Orthogonalize refusal direction to remove any capability-damaging components
+4. Abliterate with the safe, orthogonalized direction
+
+**Expected impact:** +20-30% capability preservation (reduced MMLU accuracy drop)
+
 ### Validation Framework
 
 Enable validation to measure abliteration effectiveness:
@@ -238,17 +256,16 @@ Optuna automatically resumes from last completed trial.
 **Core Components:**
 - `Model` - HuggingFace model wrapper with abliteration operations
 - `Evaluator` - Multi-objective scoring (KL divergence + refusal counting)
-- `Settings` - Pydantic configuration with CLI/env/file support
+- `Settings` - Pydantic configuration with CLI/env/file support + validators
 - `heretic-vast` - Cloud GPU management CLI for Vast.ai
+- `phases/` - Modular pipeline components (dataset loading, direction extraction, optimization, saving)
+- `constants` - Centralized thresholds and magic numbers
 
-**Abliteration Pipeline:**
-1. Load model and tokenizer with dtype fallback chain
-2. Load contrastive prompt datasets (good/bad examples)
-3. Auto-detect optimal batch size if needed
-4. Compute per-layer behavioral directions from residual activations
-5. Run Optuna optimization loop with TPE sampler
-6. Present Pareto-optimal trials for selection
-7. Save/upload/chat with modified model
+**Abliteration Pipeline (Modular Phases):**
+1. **Dataset Loading** (`phases.dataset_loading`) - Load good/bad/sacred prompts
+2. **Direction Extraction** (`phases.direction_extraction`) - Extract refusal directions, apply orthogonalization
+3. **Optimization** (`phases.optimization`) - Optuna TPE optimization with warm-start
+4. **Model Saving** (`phases.model_saving`) - Save locally or upload to HuggingFace
 
 ## Error Handling
 

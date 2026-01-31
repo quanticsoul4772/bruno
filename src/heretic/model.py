@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import torch
 import torch.nn.functional as F
-from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
+from huggingface_hub.errors import (
+    GatedRepoError,
+    RepositoryNotFoundError,
+)
 from requests.exceptions import ConnectionError, Timeout
 from torch import LongTensor, Tensor
 from torch.nn import ModuleList
@@ -24,10 +27,17 @@ from transformers import (
 from transformers.generation.utils import GenerateOutput
 
 from .config import Settings
+from .constants import (
+    CACHE_CLEAR_INTERVAL,
+    EPSILON,
+    NEAR_ZERO,
+    SACRED_PCA_ALPHA,
+)
+from .error_tracker import record_suppressed_error
 from .exceptions import (
     ConfigurationError,
-    ModelInferenceError,
     ModelLoadError,
+    SacredDirectionError,
     SupervisedProbeError,
 )
 from .logging import get_logger
@@ -441,6 +451,22 @@ class CircuitAblationResult:
 
 
 @dataclass
+class SacredDirectionResult:
+    """Result from sacred direction extraction.
+
+    Contains directions that encode capabilities to preserve during ablation.
+    These are orthogonalized against before abliterating to prevent capability damage.
+
+    Attributes:
+        directions: Sacred directions tensor of shape (n_layers, n_sacred, hidden_dim)
+        eigenvalues: Eigenvalues from PCA of shape (n_layers, n_sacred)
+    """
+
+    directions: Tensor
+    eigenvalues: Tensor
+
+
+@dataclass
 class SupervisedExtractionResult:
     """Result from supervised probe-based refusal direction extraction.
 
@@ -589,7 +615,7 @@ class PCAExtractionResult:
 
         # Ensure positive values (eigenvalues from contrastive PCA can be negative)
         # We use max(0, x) + epsilon to handle negative eigenvalues
-        positive_eigenvalues = torch.clamp(mean_eigenvalues, min=1e-8)
+        positive_eigenvalues = torch.clamp(mean_eigenvalues, min=EPSILON)
 
         if method == "softmax":
             # Softmax normalization (sum to 1, smooth distribution)
@@ -647,8 +673,12 @@ class Model:
                 f"Run 'huggingface-cli login' first."
             ) from error
         except (ConnectionError, Timeout) as error:
-            logger.error("Network error loading tokenizer", model=settings.model, error=str(error))
-            print(f"[red]Network Error: Cannot download tokenizer[/]")
+            logger.error(
+                "Network error loading tokenizer",
+                model=settings.model,
+                error=str(error),
+            )
+            print("[red]Network Error: Cannot download tokenizer[/]")
             print("[yellow]Check internet connection and try again[/]")
             raise ModelLoadError(
                 f"Network error downloading tokenizer for '{settings.model}'. "
@@ -662,7 +692,9 @@ class Model:
 
         self.model = None
 
-        logger.debug("Starting dtype fallback chain", dtypes=[str(d) for d in settings.dtypes])
+        logger.debug(
+            "Starting dtype fallback chain", dtypes=[str(d) for d in settings.dtypes]
+        )
         for dtype in settings.dtypes:
             print(f"* Trying dtype [bold]{dtype}[/]... ", end="")
             logger.debug("Attempting dtype", dtype=str(dtype))
@@ -706,11 +738,13 @@ class Model:
             except (ConnectionError, Timeout) as error:
                 # Network error during model download
                 print()
-                print(f"[red]Network Error: Cannot download model[/]")
+                print("[red]Network Error: Cannot download model[/]")
                 print("[yellow]Solutions:[/]")
                 print("  1. Check your internet connection")
                 print("  2. Try again in a few minutes")
-                print("  3. Check HuggingFace Hub status: https://status.huggingface.co")
+                print(
+                    "  3. Check HuggingFace Hub status: https://status.huggingface.co"
+                )
                 raise ModelLoadError(
                     f"Network error while downloading model '{settings.model}'. "
                     f"Check internet connection and try again."
@@ -718,12 +752,16 @@ class Model:
             except OSError as error:
                 # Check if disk space error
                 error_msg = str(error).lower()
-                if "disk" in error_msg or "space" in error_msg or "storage" in error_msg:
+                if (
+                    "disk" in error_msg
+                    or "space" in error_msg
+                    or "storage" in error_msg
+                ):
                     print()
-                    print(f"[red]Insufficient Disk Space[/]")
+                    print("[red]Insufficient Disk Space[/]")
                     print("[yellow]Solutions:[/]")
                     print("  1. Free up disk space (check cache directory)")
-                    print(f"  2. Clear HuggingFace cache: rm -rf ~/.cache/huggingface")
+                    print("  2. Clear HuggingFace cache: rm -rf ~/.cache/huggingface")
                     print("  3. Use smaller model or quantized version")
                     raise ModelLoadError(
                         f"Insufficient disk space to download model '{settings.model}'. "
@@ -737,22 +775,26 @@ class Model:
             except RuntimeError as error:
                 # Check if dtype incompatibility (probability tensor error)
                 error_msg = str(error).lower()
-                if "probability" in error_msg or "inf" in error_msg or "nan" in error_msg:
+                if (
+                    "probability" in error_msg
+                    or "inf" in error_msg
+                    or "nan" in error_msg
+                ):
                     # Dtype incompatibility - try next dtype
                     self.model = None
                     empty_cache()
-                    print(f"[yellow]Incompatible[/] (dtype issue, trying next...)")
+                    print("[yellow]Incompatible[/] (dtype issue, trying next...)")
                     continue
                 # Other runtime errors - let them fall through
                 self.model = None
                 empty_cache()
                 print(f"[red]Failed[/] ({error})")
                 continue
-            except torch.cuda.OutOfMemoryError as error:
+            except torch.cuda.OutOfMemoryError:
                 # GPU out of memory - try next dtype (lower precision)
                 self.model = None
                 empty_cache()
-                print(f"[yellow]GPU OOM[/] (trying next dtype...)")
+                print("[yellow]GPU OOM[/] (trying next dtype...)")
                 continue
             except KeyboardInterrupt:
                 # CRITICAL: Always let user interrupt
@@ -770,10 +812,12 @@ class Model:
 
         if self.model is None:
             print()
-            print(f"[red]Failed to load model with any configured dtype[/]")
+            print("[red]Failed to load model with any configured dtype[/]")
             print(f"[yellow]Tried dtypes: {settings.dtypes}[/]")
             print("[yellow]Solutions:[/]")
-            print("  1. Add more dtypes to config: dtypes = [torch.float16, torch.bfloat16, torch.float32]")
+            print(
+                "  1. Add more dtypes to config: dtypes = [torch.float16, torch.bfloat16, torch.float32]"
+            )
             print("  2. Check GPU compatibility (older GPUs may not support bfloat16)")
             print("  3. Try smaller model or quantized version")
             raise ModelLoadError(
@@ -1003,7 +1047,7 @@ class Model:
                     matrix.sub_(weight * (device_projector @ matrix))
 
             # Clear CUDA cache periodically to prevent memory fragmentation
-            if layer_index % 8 == 7:
+            if layer_index % CACHE_CLEAR_INTERVAL == (CACHE_CLEAR_INTERVAL - 1):
                 empty_cache()
 
         # Clear the device projector cache to prevent memory leaks
@@ -1214,7 +1258,7 @@ class Model:
         except (RuntimeError, torch.linalg.LinAlgError):
             # Fallback to mean difference for all layers if batched eigendecomposition fails
             diff = bad_means - good_means  # Shape: (n_layers, hidden_dim)
-            diff = diff / (torch.linalg.norm(diff, dim=1, keepdim=True) + 1e-8)
+            diff = diff / (torch.linalg.norm(diff, dim=1, keepdim=True) + EPSILON)
             # Repeat for n_components
             directions = diff.unsqueeze(1).expand(
                 -1, n_components, -1
@@ -1294,6 +1338,239 @@ class Model:
         # Remove projection and renormalize
         orthogonal = target_direction - projection
         return F.normalize(orthogonal, p=2, dim=1)
+
+    def extract_sacred_directions(
+        self,
+        capability_residuals: Tensor,
+        baseline_residuals: Tensor,
+        n_directions: int = 5,
+    ) -> SacredDirectionResult:
+        """Extract directions that encode capabilities to preserve.
+
+        Uses contrastive PCA to find directions that maximize variance in
+        capability prompts (e.g., MMLU) vs baseline text.
+
+        Args:
+            capability_residuals: Residuals from capability prompts (MMLU, etc.)
+                Shape: (n_samples, n_layers, hidden_dim)
+            baseline_residuals: Residuals from generic baseline text
+                Shape: (n_samples, n_layers, hidden_dim)
+            n_directions: Number of sacred directions to extract per layer
+
+        Returns:
+            SacredDirectionResult with directions and eigenvalues
+
+        Raises:
+            SacredDirectionError: If extraction fails
+        """
+        n_layers = capability_residuals.shape[1]
+        hidden_dim = capability_residuals.shape[2]
+        device = capability_residuals.device
+
+        sacred_directions = torch.zeros(
+            n_layers, n_directions, hidden_dim, device=device
+        )
+        eigenvalues = torch.zeros(n_layers, n_directions, device=device)
+
+        # Contrastive PCA alpha - favor capability-specific variance
+        alpha = SACRED_PCA_ALPHA
+
+        for layer_idx in range(n_layers):
+            try:
+                # Extract layer activations and convert to float32 for stability
+                cap_layer = capability_residuals[:, layer_idx, :].float()
+                base_layer = baseline_residuals[:, layer_idx, :].float()
+
+                # Center the data
+                cap_centered = cap_layer - cap_layer.mean(dim=0)
+                base_centered = base_layer - base_layer.mean(dim=0)
+
+                # Compute covariance matrices using einsum for efficiency
+                n_cap = cap_centered.shape[0]
+                n_base = base_centered.shape[0]
+
+                cov_cap = torch.einsum("ni,nj->ij", cap_centered, cap_centered) / (
+                    n_cap - 1
+                )
+                cov_base = torch.einsum("ni,nj->ij", base_centered, base_centered) / (
+                    n_base - 1
+                )
+
+                # Contrastive covariance: maximize capability variance, minimize baseline
+                cov_contrastive = cov_cap - alpha * cov_base
+
+                # Make symmetric (numerical stability)
+                cov_contrastive = (cov_contrastive + cov_contrastive.T) / 2
+
+                # GPU-accelerated eigendecomposition
+                eig_vals, eig_vecs = torch.linalg.eigh(cov_contrastive)
+
+                # Take top n_directions (eigenvalues are in ascending order)
+                top_indices = torch.argsort(eig_vals, descending=True)[:n_directions]
+                sacred_directions[layer_idx] = eig_vecs[:, top_indices].T
+                eigenvalues[layer_idx] = eig_vals[top_indices]
+
+            except Exception as e:
+                logger.warning(
+                    "Sacred direction extraction failed for layer",
+                    layer=layer_idx,
+                    error=str(e),
+                )
+                # Use mean difference as fallback
+                mean_diff = capability_residuals[:, layer_idx, :].mean(
+                    dim=0
+                ) - baseline_residuals[:, layer_idx, :].mean(dim=0)
+                sacred_directions[layer_idx, 0] = F.normalize(
+                    mean_diff.float(), p=2, dim=0
+                )
+                # Zero out remaining directions
+                if n_directions > 1:
+                    sacred_directions[layer_idx, 1:] = 0
+                eigenvalues[layer_idx] = 0
+
+        # Normalize all directions
+        sacred_directions = F.normalize(sacred_directions, p=2, dim=2)
+
+        return SacredDirectionResult(
+            directions=sacred_directions,
+            eigenvalues=eigenvalues,
+        )
+
+    def _orthogonalize_single_against_sacred(
+        self,
+        direction: Tensor,
+        sacred_directions: Tensor,
+    ) -> Tensor:
+        """Orthogonalize a single 2D direction against all sacred directions.
+
+        Uses iterative Gram-Schmidt orthogonalization.
+
+        Args:
+            direction: Direction to orthogonalize, shape (n_layers, hidden_dim)
+            sacred_directions: Sacred directions, shape (n_layers, n_sacred, hidden_dim)
+
+        Returns:
+            Orthogonalized direction, shape (n_layers, hidden_dim)
+        """
+        result = direction.clone()
+        n_sacred = sacred_directions.shape[1]
+
+        for sacred_idx in range(n_sacred):
+            sacred = sacred_directions[:, sacred_idx, :]  # (n_layers, hidden_dim)
+
+            # Project result onto sacred direction
+            dot_product = (result * sacred).sum(dim=1, keepdim=True)
+            projection = dot_product * sacred
+
+            # Remove projection
+            result = result - projection
+
+        return result
+
+    def orthogonalize_against_sacred(
+        self,
+        refusal_direction: Tensor,
+        sacred_directions: Tensor,
+    ) -> Tensor:
+        """Orthogonalize refusal direction(s) against all sacred directions.
+
+        Removes any component of the refusal direction that lies in the span
+        of the sacred directions, mathematically guaranteeing that ablation
+        cannot damage the encoded capabilities.
+
+        Handles both 2D (single direction) and 3D (multiple directions) input.
+
+        Args:
+            refusal_direction: Direction(s) to orthogonalize
+                - 2D shape: (n_layers, hidden_dim) - single direction
+                - 3D shape: (n_layers, n_components, hidden_dim) - multiple directions
+            sacred_directions: Sacred capability directions
+                Shape: (n_layers, n_sacred, hidden_dim)
+
+        Returns:
+            Orthogonalized and renormalized direction(s), same shape as input
+
+        Raises:
+            SacredDirectionError: If orthogonalization results in near-zero direction
+        """
+        # Handle 3D case (multiple refusal directions)
+        if refusal_direction.dim() == 3:
+            n_components = refusal_direction.shape[1]
+            result = torch.zeros_like(refusal_direction)
+
+            for comp_idx in range(n_components):
+                single_dir = refusal_direction[:, comp_idx, :]
+                orthogonalized = self._orthogonalize_single_against_sacred(
+                    single_dir, sacred_directions
+                )
+                result[:, comp_idx, :] = orthogonalized
+
+            # Check for near-zero directions
+            magnitudes = result.norm(dim=2)  # (n_layers, n_components)
+            if (magnitudes < NEAR_ZERO).any():
+                zero_count = (magnitudes < NEAR_ZERO).sum().item()
+                raise SacredDirectionError(
+                    f"Orthogonalization resulted in {zero_count} near-zero direction(s). "
+                    "Refusal direction may lie within sacred direction span. "
+                    "Try reducing n_sacred_directions or disabling sacred direction preservation."
+                )
+
+            # Renormalize
+            return F.normalize(result, p=2, dim=2)
+
+        # Handle 2D case (single refusal direction)
+        result = self._orthogonalize_single_against_sacred(
+            refusal_direction, sacred_directions
+        )
+
+        # Check for near-zero result
+        magnitudes = result.norm(dim=1)  # (n_layers,)
+        if (magnitudes < NEAR_ZERO).any():
+            zero_layers = (magnitudes < NEAR_ZERO).sum().item()
+            raise SacredDirectionError(
+                f"Orthogonalization resulted in near-zero direction in {zero_layers} layer(s). "
+                "Refusal direction may lie within sacred direction span. "
+                "Try reducing n_sacred_directions or disabling sacred direction preservation."
+            )
+
+        # Renormalize
+        return F.normalize(result, p=2, dim=1)
+
+    def compute_sacred_overlap(
+        self,
+        refusal_direction: Tensor,
+        sacred_directions: Tensor,
+    ) -> dict[str, float]:
+        """Compute overlap between refusal direction and sacred directions.
+
+        Higher overlap means more potential for capability damage during ablation.
+
+        Args:
+            refusal_direction: Refusal direction, shape (n_layers, hidden_dim)
+            sacred_directions: Sacred directions, shape (n_layers, n_sacred, hidden_dim)
+
+        Returns:
+            Dictionary with overlap statistics:
+                - mean_overlap: Mean cosine similarity across all layers and sacred directions
+                - max_overlap: Maximum cosine similarity
+                - per_layer_mean: Mean overlap per layer
+        """
+        n_layers = refusal_direction.shape[0]
+        n_sacred = sacred_directions.shape[1]
+
+        overlaps = torch.zeros(n_layers, n_sacred, device=refusal_direction.device)
+
+        for sacred_idx in range(n_sacred):
+            sacred = sacred_directions[:, sacred_idx, :]  # (n_layers, hidden_dim)
+            # Cosine similarity per layer
+            cos_sim = F.cosine_similarity(refusal_direction, sacred, dim=1)
+            overlaps[:, sacred_idx] = cos_sim.abs()  # Use absolute value
+
+        return {
+            "mean_overlap": overlaps.mean().item(),
+            "max_overlap": overlaps.max().item(),
+            "per_layer_mean": overlaps.mean(dim=1).tolist(),
+        }
 
     # Phase 4: Iterative Refinement
     def abliterate_iterative(
@@ -1563,7 +1840,7 @@ class Model:
 
             # Extract and normalize weights
             weights = clf.coef_[0]
-            weights = weights / (np.linalg.norm(weights) + 1e-8)
+            weights = weights / (np.linalg.norm(weights) + EPSILON)
 
             return weights, accuracy
 
@@ -1685,7 +1962,7 @@ class Model:
 
         # Compute calibration factor
         # Scale weight inversely to activation strength relative to mean
-        if stats.mean_projection > 1e-8:
+        if stats.mean_projection > EPSILON:
             calibration_factor = target_value / stats.mean_projection
         else:
             # If mean projection is near zero, refusal direction may be weak
@@ -2112,7 +2389,7 @@ class Model:
                 o_proj.data.add_(effective_strength * (device_projector @ o_proj.data))
 
                 # Clean up periodically
-                if layer_idx % 8 == 7:
+                if layer_idx % CACHE_CLEAR_INTERVAL == (CACHE_CLEAR_INTERVAL - 1):
                     empty_cache()
 
         return caa_applied
@@ -2167,6 +2444,18 @@ class Model:
         )
 
         if n_refusals < 10 or n_comply < 10:
+            record_suppressed_error(
+                error=None,
+                context="get_compliance_directions_from_responses",
+                module="model",
+                severity="info",
+                details={
+                    "n_refusals": n_refusals,
+                    "n_comply": n_comply,
+                    "min_required": 10,
+                    "reason": "Insufficient samples for CAA",
+                },
+            )
             print(
                 f"[yellow]Warning: Insufficient samples for CAA "
                 f"(refusals={n_refusals}, comply={n_comply}, need 10+ each). "
@@ -2472,6 +2761,16 @@ class Model:
         import os
 
         if not os.path.exists(cache_path):
+            record_suppressed_error(
+                error=None,
+                context="load_circuits_from_cache",
+                module="model",
+                severity="debug",
+                details={
+                    "cache_path": cache_path,
+                    "reason": "Cache file not found",
+                },
+            )
             return None
 
         try:
@@ -2480,6 +2779,18 @@ class Model:
 
             # Verify model matches
             if cache_data.get("model") != self.settings.model:
+                record_suppressed_error(
+                    error=None,
+                    context="load_circuits_from_cache",
+                    module="model",
+                    severity="info",
+                    details={
+                        "cache_model": cache_data.get("model"),
+                        "current_model": self.settings.model,
+                        "cache_path": cache_path,
+                        "reason": "Model mismatch",
+                    },
+                )
                 print(
                     f"[yellow]Warning: Circuit cache is for model "
                     f"'{cache_data.get('model')}', not '{self.settings.model}'. "
@@ -2500,6 +2811,16 @@ class Model:
             return circuits
 
         except (json.JSONDecodeError, KeyError) as e:
+            record_suppressed_error(
+                error=e,
+                context="load_circuits_from_cache",
+                module="model",
+                severity="warning",
+                details={
+                    "cache_path": cache_path,
+                    "reason": "Failed to parse cache file",
+                },
+            )
             print(
                 f"[yellow]Warning: Failed to load circuit cache: {e}. "
                 f"Will rediscover circuits.[/yellow]"

@@ -17,14 +17,19 @@ from accelerate.utils import (
 )
 from datasets import load_dataset, load_from_disk
 from datasets.exceptions import DatasetNotFoundError
-from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
 from optuna import Trial
-from requests.exceptions import ConnectionError, Timeout
 from requests import HTTPError
+from requests.exceptions import ConnectionError, Timeout
 from rich.console import Console
 
 from .config import DatasetSpecification, Settings
-from .exceptions import BatchSizeError, DatasetConfigError, DatasetError, NetworkTimeoutError
+from .error_tracker import record_suppressed_error
+from .exceptions import (
+    BatchSizeError,
+    DatasetConfigError,
+    DatasetError,
+    NetworkTimeoutError,
+)
 from .logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +38,15 @@ print = Console(highlight=False).print
 
 
 # Re-export BatchSizeError for backwards compatibility
-__all__ = ["BatchSizeError", "print", "empty_cache", "load_prompts", "batchify", "get_gpu_memory_info", "retry_with_backoff"]
+__all__ = [
+    "BatchSizeError",
+    "print",
+    "empty_cache",
+    "load_prompts",
+    "batchify",
+    "get_gpu_memory_info",
+    "retry_with_backoff",
+]
 
 
 def retry_with_backoff(
@@ -60,6 +73,7 @@ def retry_with_backoff(
         def download_file(url):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -70,7 +84,7 @@ def retry_with_backoff(
                 except retryable_exceptions as e:
                     last_exception = e
                     if attempt < max_retries:
-                        delay = min(base_delay * (exponential_base ** attempt), max_delay)
+                        delay = min(base_delay * (exponential_base**attempt), max_delay)
                         logger.warning(
                             f"Retry {attempt + 1}/{max_retries} after {delay:.1f}s",
                             error=str(e),
@@ -84,7 +98,9 @@ def retry_with_backoff(
                             func=func.__name__,
                         )
             raise last_exception
+
         return wrapper
+
     return decorator
 
 
@@ -124,10 +140,9 @@ def _load_streaming_dataset(
 
         except (ConnectionError, Timeout) as e:
             if attempt < max_retries:
-                delay = min(base_delay * (2 ** attempt), 60.0)
+                delay = min(base_delay * (2**attempt), 60.0)
                 logger.warning(
-                    f"Network error, retry {attempt + 1}/{max_retries} after {delay:.1f}s",
-                    error=str(e),
+                    f"Network error, retry {attempt + 1}/{max_retries} after {delay:.1f}s: {e}"
                 )
                 time.sleep(delay)
             else:
@@ -142,7 +157,9 @@ def _load_streaming_dataset(
             ) from e
 
     # Should never reach here, but satisfy type checker
-    raise NetworkTimeoutError(f"Failed to load streaming dataset after {max_retries} retries")
+    raise NetworkTimeoutError(
+        f"Failed to load streaming dataset after {max_retries} retries"
+    )
 
 
 def get_gpu_memory_info() -> dict:
@@ -167,7 +184,14 @@ def get_gpu_memory_info() -> dict:
             "free_gb": free / 1e9,
             "utilization_pct": (allocated / total) * 100 if total > 0 else 0,
         }
-    except Exception:
+    except Exception as e:
+        record_suppressed_error(
+            error=e,
+            context="get_gpu_memory_info",
+            module="utils",
+            severity="debug",
+            details={"fallback": "returning zeros"},
+        )
         return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "utilization_pct": 0}
 
 
@@ -294,8 +318,10 @@ def load_prompts(specification: DatasetSpecification) -> list[str]:
             if "config" in error_msg or "variant" in error_msg:
                 print(f"[red]Dataset Config Error: {specification.dataset}[/]")
                 print("[yellow]Solutions:[/]")
-                print(f"  1. Add config parameter: --unhelpfulness-prompts.config en")
-                print(f"  2. List available configs: from datasets import get_dataset_config_names")
+                print("  1. Add config parameter: --unhelpfulness-prompts.config en")
+                print(
+                    "  2. List available configs: from datasets import get_dataset_config_names"
+                )
                 print(f"     get_dataset_config_names('{specification.dataset}')")
                 raise DatasetConfigError(
                     f"Dataset '{specification.dataset}' requires a config parameter. "
@@ -309,12 +335,14 @@ def load_prompts(specification: DatasetSpecification) -> list[str]:
         try:
             if specification.config:
                 dataset = load_dataset(
-                    specification.dataset, specification.config, split=specification.split
+                    specification.dataset,
+                    specification.config,
+                    split=specification.split,
                 )
             else:
                 dataset = load_dataset(specification.dataset, split=specification.split)
         except (ConnectionError, Timeout) as e:
-            print(f"[red]Network Error: Cannot download dataset[/]")
+            print("[red]Network Error: Cannot download dataset[/]")
             print("[yellow]Solutions:[/]")
             print("  1. Check your internet connection")
             print("  2. Try again in a few minutes")
@@ -334,7 +362,9 @@ def load_prompts(specification: DatasetSpecification) -> list[str]:
                 ) from e
             elif e.response.status_code == 404:
                 print(f"[red]Dataset Not Found: {specification.dataset}[/]")
-                print("[yellow]Search HuggingFace Hub: https://huggingface.co/datasets[/]")
+                print(
+                    "[yellow]Search HuggingFace Hub: https://huggingface.co/datasets[/]"
+                )
                 raise DatasetError(
                     f"Dataset '{specification.dataset}' not found. "
                     f"Check name or search: https://huggingface.co/datasets"
@@ -345,7 +375,9 @@ def load_prompts(specification: DatasetSpecification) -> list[str]:
             print(f"[yellow]Dataset: {specification.dataset}[/]")
             print("[yellow]Solutions:[/]")
             print("  1. Check config name spelling")
-            print(f"  2. List available configs: from datasets import get_dataset_config_names")
+            print(
+                "  2. List available configs: from datasets import get_dataset_config_names"
+            )
             print(f"     get_dataset_config_names('{specification.dataset}')")
             raise DatasetConfigError(
                 f"Config '{specification.config}' not found for dataset '{specification.dataset}'. "
@@ -366,7 +398,9 @@ def load_prompts(specification: DatasetSpecification) -> list[str]:
                 ) from e
             elif "config" in error_msg:
                 print(f"[red]Dataset Config Required: {specification.dataset}[/]")
-                print("[yellow]Add config parameter (e.g., --unhelpfulness-prompts.config en)[/]")
+                print(
+                    "[yellow]Add config parameter (e.g., --unhelpfulness-prompts.config en)[/]"
+                )
                 raise DatasetConfigError(
                     f"Dataset '{specification.dataset}' requires a config parameter. "
                     f"Try adding: --unhelpfulness-prompts.config <config_name>"
@@ -376,11 +410,15 @@ def load_prompts(specification: DatasetSpecification) -> list[str]:
             # Check if disk space error
             error_msg = str(e).lower()
             if "disk" in error_msg or "space" in error_msg or "storage" in error_msg:
-                print(f"[red]Insufficient Disk Space[/]")
+                print("[red]Insufficient Disk Space[/]")
                 print("[yellow]Solutions:[/]")
                 print("  1. Free up disk space")
-                print("  2. Clear HuggingFace cache: rm -rf ~/.cache/huggingface/datasets")
-                print("  3. Use smaller dataset split (e.g., train[:100] instead of train[:1000])")
+                print(
+                    "  2. Clear HuggingFace cache: rm -rf ~/.cache/huggingface/datasets"
+                )
+                print(
+                    "  3. Use smaller dataset split (e.g., train[:100] instead of train[:1000])"
+                )
                 raise DatasetError(
                     f"Insufficient disk space to download dataset '{specification.dataset}'. "
                     f"Free up space or use smaller split."
