@@ -231,6 +231,140 @@ class TestValidationReport:
             assert loaded.post_abliteration.kl_divergence == 0.4
 
 
+class TestMMLUCategoryValidation:
+    """Test MMLU category name validation.
+
+    These tests ensure all configured MMLU category names are valid.
+    This prevents bugs like using 'world_history' instead of 'high_school_world_history'.
+    """
+
+    # Complete list of valid MMLU categories from cais/mmlu dataset
+    VALID_MMLU_CATEGORIES = {
+        "abstract_algebra",
+        "all",
+        "anatomy",
+        "astronomy",
+        "auxiliary_train",
+        "business_ethics",
+        "clinical_knowledge",
+        "college_biology",
+        "college_chemistry",
+        "college_computer_science",
+        "college_mathematics",
+        "college_medicine",
+        "college_physics",
+        "computer_security",
+        "conceptual_physics",
+        "econometrics",
+        "electrical_engineering",
+        "elementary_mathematics",
+        "formal_logic",
+        "global_facts",
+        "high_school_biology",
+        "high_school_chemistry",
+        "high_school_computer_science",
+        "high_school_european_history",
+        "high_school_geography",
+        "high_school_government_and_politics",
+        "high_school_macroeconomics",
+        "high_school_mathematics",
+        "high_school_microeconomics",
+        "high_school_physics",
+        "high_school_psychology",
+        "high_school_statistics",
+        "high_school_us_history",
+        "high_school_world_history",
+        "human_aging",
+        "human_sexuality",
+        "international_law",
+        "jurisprudence",
+        "logical_fallacies",
+        "machine_learning",
+        "management",
+        "marketing",
+        "medical_genetics",
+        "miscellaneous",
+        "moral_disputes",
+        "moral_scenarios",
+        "nutrition",
+        "philosophy",
+        "prehistory",
+        "professional_accounting",
+        "professional_law",
+        "professional_medicine",
+        "professional_psychology",
+        "public_relations",
+        "security_studies",
+        "sociology",
+        "us_foreign_policy",
+        "virology",
+        "world_religions",
+    }
+
+    def test_default_mmlu_categories_are_valid(self):
+        """Test that all default MMLU categories in Settings are valid.
+
+        This test prevents bugs like using 'world_history' instead of
+        'high_school_world_history' (which was a real bug fixed in commit 10e7d11).
+        """
+        from heretic.config import Settings
+
+        settings = Settings(model="test-model")
+
+        invalid_categories = []
+        for category in settings.mmlu_categories:
+            if category not in self.VALID_MMLU_CATEGORIES:
+                invalid_categories.append(category)
+
+        assert not invalid_categories, (
+            f"Invalid MMLU categories found in Settings.mmlu_categories: {invalid_categories}. "
+            f"Valid categories are: {sorted(self.VALID_MMLU_CATEGORIES)}"
+        )
+
+    def test_default_mmlu_categories_module_constant_is_valid(self):
+        """Test that DEFAULT_MMLU_CATEGORIES constant contains valid categories."""
+        from heretic.validation import DEFAULT_MMLU_CATEGORIES
+
+        invalid_categories = []
+        for category in DEFAULT_MMLU_CATEGORIES:
+            if category not in self.VALID_MMLU_CATEGORIES:
+                invalid_categories.append(category)
+
+        assert not invalid_categories, (
+            f"Invalid MMLU categories found in DEFAULT_MMLU_CATEGORIES: {invalid_categories}. "
+            f"Valid categories are: {sorted(self.VALID_MMLU_CATEGORIES)}"
+        )
+
+    def test_known_invalid_category_would_fail(self):
+        """Test that the validation would catch the old 'world_history' bug."""
+        # This is a regression test - 'world_history' was incorrectly used
+        # instead of 'high_school_world_history'
+        assert "world_history" not in self.VALID_MMLU_CATEGORIES
+        assert "high_school_world_history" in self.VALID_MMLU_CATEGORIES
+
+    def test_common_typos_are_invalid(self):
+        """Test that common category name typos are not in valid set."""
+        # These are plausible typos that should NOT be valid
+        invalid_typos = [
+            "abstract-algebra",  # hyphen instead of underscore
+            "abstractalgebra",  # no separator
+            "high_school_history",  # too generic
+            "world_history",  # missing 'high_school_' prefix
+            "us_history",  # missing 'high_school_' prefix
+            "european_history",  # missing 'high_school_' prefix
+            "computer_science",  # ambiguous (college vs high_school)
+            "biology",  # ambiguous (college vs high_school)
+            "chemistry",  # ambiguous (college vs high_school)
+            "physics",  # ambiguous (college vs high_school)
+            "mathematics",  # ambiguous (college vs high_school vs elementary)
+        ]
+
+        for typo in invalid_typos:
+            assert typo not in self.VALID_MMLU_CATEGORIES, (
+                f"'{typo}' should not be a valid MMLU category"
+            )
+
+
 class TestMMLUResult:
     """Test MMLUResult dataclass."""
 
