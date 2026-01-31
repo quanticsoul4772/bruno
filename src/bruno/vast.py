@@ -1867,6 +1867,249 @@ def connect_ssh(ctx, instance_id: Optional[str]):
     )
 
 
+@cli.command("visualize")
+@click.argument("study_name", required=False, default="heretic_study")
+@click.option(
+    "--storage",
+    "-s",
+    default="sqlite:///heretic_study.db",
+    help="Optuna storage URL",
+)
+@click.option(
+    "--output",
+    "-o",
+    default="./plots",
+    help="Output directory for HTML plots",
+)
+@click.option(
+    "--open",
+    "open_browser",
+    is_flag=True,
+    help="Open plots in browser after generation",
+)
+@click.option(
+    "--remote",
+    is_flag=True,
+    help="Download study database from remote instance first",
+)
+@click.argument("instance_id", required=False)
+@click.pass_context
+def visualize_study(
+    ctx,
+    study_name: str,
+    storage: str,
+    output: str,
+    open_browser: bool,
+    remote: bool,
+    instance_id: Optional[str],
+):
+    """Generate visualization plots from an Optuna study.
+
+    Creates interactive HTML plots showing optimization progress:
+    - optimization_history.html - Trial progress over time
+    - pareto_front.html - KL vs Refusals trade-off
+    - param_importances.html - Which parameters matter most
+    - parallel_coordinate.html - Parameter interactions
+    - timeline.html - Trial duration over time
+
+    Examples:
+        bruno-vast visualize                          # Use local defaults
+        bruno-vast visualize qwen32b-v2               # Specific study
+        bruno-vast visualize --remote                 # Download from instance first
+        bruno-vast visualize --open                   # Open in browser after
+    """
+    try:
+        import optuna
+        from optuna.visualization import (
+            plot_contour,
+            plot_optimization_history,
+            plot_parallel_coordinate,
+            plot_param_importances,
+            plot_pareto_front,
+            plot_slice,
+            plot_timeline,
+        )
+    except ImportError:
+        console.print("[red]Error: optuna visualization requires plotly.[/]")
+        console.print("Install with: pip install 'optuna[plotly]'")
+        return
+
+    config = ctx.obj["config"]
+    output_path = Path(output)
+
+    # Download from remote if requested
+    if remote:
+        if not instance_id:
+            inst = get_running_instance(config)
+            if not inst:
+                console.print("[red]Error: No running instance found[/]")
+                return
+            instance_id = str(inst["id"])
+
+        console.print(
+            f"[yellow]Downloading study database from instance {instance_id}...[/]"
+        )
+
+        ssh_info = get_ssh_info(instance_id, config)
+        if not ssh_info:
+            console.print("[red]Could not get SSH info[/]")
+            return
+
+        host, port = ssh_info
+        local_db = Path("heretic_study.db")
+
+        # Download the database file
+        scp_cmd = [
+            "scp",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-P",
+            str(port),
+            f"root@{host}:/workspace/heretic_study.db",
+            str(local_db),
+        ]
+        result = subprocess.run(scp_cmd, capture_output=True)
+        if result.returncode != 0:
+            console.print("[red]Failed to download study database[/]")
+            console.print(result.stderr.decode())
+            return
+
+        console.print(f"[green]Downloaded to {local_db}[/]")
+        storage = f"sqlite:///{local_db}"
+
+    # Load the study
+    console.print(f"\nLoading study '[cyan]{study_name}[/]' from {storage}...")
+
+    try:
+        study = optuna.load_study(
+            study_name=study_name,
+            storage=storage,
+        )
+    except KeyError:
+        console.print(f"[red]Error: Study '{study_name}' not found[/]")
+        console.print("\n[yellow]Available studies:[/]")
+        try:
+            summaries = optuna.study.get_all_study_summaries(storage)
+            for s in summaries:
+                console.print(f"  - {s.study_name} ({s.n_trials} trials)")
+        except Exception:
+            pass
+        return
+    except Exception as e:
+        console.print(f"[red]Error loading study: {e}[/]")
+        return
+
+    # Get completed trials
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    console.print(f"Found [green]{len(completed)}[/] completed trials")
+
+    if len(completed) < 2:
+        console.print("[yellow]Need at least 2 completed trials for visualization[/]")
+        return
+
+    # Create output directory
+    output_path.mkdir(parents=True, exist_ok=True)
+    console.print(f"\nSaving plots to [cyan]{output_path}/[/]")
+
+    # Generate plots
+    plots_generated = []
+
+    with console.status("[bold green]Generating plots...") as status:
+        # 1. Optimization History
+        status.update("[bold green]Generating optimization history...")
+        try:
+            fig = plot_optimization_history(study)
+            fig.write_html(output_path / "optimization_history.html")
+            plots_generated.append("optimization_history.html")
+            console.print("  [green]✓[/] optimization_history.html")
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] optimization_history: {e}")
+
+        # 2. Pareto Front (for multi-objective)
+        if len(study.directions) > 1:
+            status.update("[bold green]Generating Pareto front...")
+            try:
+                fig = plot_pareto_front(study)
+                fig.write_html(output_path / "pareto_front.html")
+                plots_generated.append("pareto_front.html")
+                console.print("  [green]✓[/] pareto_front.html")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/] pareto_front: {e}")
+
+        # 3. Parameter Importances
+        status.update("[bold green]Generating parameter importances...")
+        try:
+            fig = plot_param_importances(study)
+            fig.write_html(output_path / "param_importances.html")
+            plots_generated.append("param_importances.html")
+            console.print("  [green]✓[/] param_importances.html")
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] param_importances: {e}")
+
+        # 4. Parallel Coordinate
+        status.update("[bold green]Generating parallel coordinate...")
+        try:
+            fig = plot_parallel_coordinate(study)
+            fig.write_html(output_path / "parallel_coordinate.html")
+            plots_generated.append("parallel_coordinate.html")
+            console.print("  [green]✓[/] parallel_coordinate.html")
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] parallel_coordinate: {e}")
+
+        # 5. Contour
+        status.update("[bold green]Generating contour plot...")
+        try:
+            params = list(completed[0].params.keys()) if completed else []
+            weight_params = [p for p in params if "max_weight" in p]
+            if len(weight_params) >= 2:
+                fig = plot_contour(study, params=weight_params[:2])
+            else:
+                fig = plot_contour(study)
+            fig.write_html(output_path / "contour.html")
+            plots_generated.append("contour.html")
+            console.print("  [green]✓[/] contour.html")
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] contour: {e}")
+
+        # 6. Slice
+        status.update("[bold green]Generating slice plot...")
+        try:
+            fig = plot_slice(study)
+            fig.write_html(output_path / "slice.html")
+            plots_generated.append("slice.html")
+            console.print("  [green]✓[/] slice.html")
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] slice: {e}")
+
+        # 7. Timeline
+        status.update("[bold green]Generating timeline...")
+        try:
+            fig = plot_timeline(study)
+            fig.write_html(output_path / "timeline.html")
+            plots_generated.append("timeline.html")
+            console.print("  [green]✓[/] timeline.html")
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] timeline: {e}")
+
+    console.print(
+        Panel.fit(
+            f"[bold green]Generated {len(plots_generated)} plots![/]\n\n"
+            f"Location: [cyan]{output_path.absolute()}[/]\n\n"
+            f"Plots:\n" + "\n".join(f"  • {p}" for p in plots_generated),
+            title="Visualization Complete",
+            border_style="green",
+        )
+    )
+
+    # Open in browser if requested
+    if open_browser and plots_generated:
+        import webbrowser
+
+        main_plot = output_path / "optimization_history.html"
+        console.print(f"\n[dim]Opening {main_plot} in browser...[/]")
+        webbrowser.open(f"file://{main_plot.absolute()}")
+
+
 def main():
     """Entry point for the CLI."""
     cli()
