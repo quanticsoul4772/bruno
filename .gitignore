@@ -1,41 +1,47 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
-build/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
 dist/
-wheels/
-*.egg-info
+build/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
-.venv
+.venv/
+venv/
+env/
 
-# Caches
-/.ruff_cache/
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Editors
-/.vscode/
-
-# Configuration files
-/config.toml
-
-# Environment files (contain secrets)
-.env
-
-# RunPod tools (downloaded separately)
-runpodctl.exe
-
-# Model directories (large files, not for git)
+# Project specific
 models/
-Qwen2.5-7B-Instruct-heretic/
-abliterated-qwen2.5-7b/
+chat_history/
+*.db
+plots/
+*.json
+!pyproject.toml
+!package.json
+!config*.toml
 
-# Temporary/build artifacts
-.coverage
-*.tar.gz
-temp_config.toml
-nul
+# OS
+.DS_Store
+Thumbs.db
 
-# Log files (can get very large)
+# Temporary
+*.tmp
+*.temp
 *.log
-heretic.log
-experiments/verbosity_v2/model/
+nohup.out
+
+# Build artifacts
+*.whl
+*.tar.gz
