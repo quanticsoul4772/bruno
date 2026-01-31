@@ -1616,8 +1616,8 @@ def download_model(
             models = [m.strip() for m in models_output.strip().split("\n") if m.strip()]
 
             if not models:
-            console.print("[red]No abliterated models found[/]")
-            console.print("Run abliteration first: bruno-vast run MODEL")
+                console.print("[red]No abliterated models found[/]")
+                console.print("Run abliteration first: bruno-vast run MODEL")
                 return
 
             if len(models) == 1:
