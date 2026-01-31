@@ -2007,6 +2007,26 @@ def visualize_study(
         console.print("[yellow]Need at least 2 completed trials for visualization[/]")
         return
 
+    # Check if multi-objective
+    is_multi_objective = len(study.directions) > 1
+    if is_multi_objective:
+        console.print(
+            f"[cyan]Multi-objective study[/] ({len(study.directions)} objectives)"
+        )
+        console.print("  Objective 0: KL Divergence (minimize)")
+        console.print("  Objective 1: Refusals (minimize)")
+        # Target functions for each objective
+        target_kl = lambda t: t.values[0] if t.values else float("inf")
+        target_refusals = (
+            lambda t: t.values[1] if t.values and len(t.values) > 1 else float("inf")
+        )
+        objectives = [
+            ("kl", "KL Divergence", target_kl),
+            ("refusals", "Refusals", target_refusals),
+        ]
+    else:
+        objectives = [("value", "Objective", None)]
+
     # Create output directory
     output_path.mkdir(parents=True, exist_ok=True)
     console.print(f"\nSaving plots to [cyan]{output_path}/[/]")
@@ -2015,73 +2035,127 @@ def visualize_study(
     plots_generated = []
 
     with console.status("[bold green]Generating plots...") as status:
-        # 1. Optimization History
-        status.update("[bold green]Generating optimization history...")
-        try:
-            fig = plot_optimization_history(study)
-            fig.write_html(output_path / "optimization_history.html")
-            plots_generated.append("optimization_history.html")
-            console.print("  [green]✓[/] optimization_history.html")
-        except Exception as e:
-            console.print(f"  [yellow]⚠[/] optimization_history: {e}")
+        # 1. Optimization History (one per objective for multi-objective)
+        for suffix, name, target in objectives:
+            filename = (
+                f"optimization_history_{suffix}.html"
+                if is_multi_objective
+                else "optimization_history.html"
+            )
+            status.update(f"[bold green]Generating {filename}...")
+            try:
+                if target:
+                    fig = plot_optimization_history(
+                        study, target=target, target_name=name
+                    )
+                else:
+                    fig = plot_optimization_history(study)
+                fig.write_html(output_path / filename)
+                plots_generated.append(filename)
+                console.print(f"  [green]✓[/] {filename}")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/] {filename}: {e}")
 
-        # 2. Pareto Front (for multi-objective)
-        if len(study.directions) > 1:
+        # 2. Pareto Front (for multi-objective only)
+        if is_multi_objective:
             status.update("[bold green]Generating Pareto front...")
             try:
-                fig = plot_pareto_front(study)
+                fig = plot_pareto_front(
+                    study,
+                    target_names=["KL Divergence", "Refusals"],
+                )
                 fig.write_html(output_path / "pareto_front.html")
                 plots_generated.append("pareto_front.html")
                 console.print("  [green]✓[/] pareto_front.html")
             except Exception as e:
                 console.print(f"  [yellow]⚠[/] pareto_front: {e}")
 
-        # 3. Parameter Importances
-        status.update("[bold green]Generating parameter importances...")
-        try:
-            fig = plot_param_importances(study)
-            fig.write_html(output_path / "param_importances.html")
-            plots_generated.append("param_importances.html")
-            console.print("  [green]✓[/] param_importances.html")
-        except Exception as e:
-            console.print(f"  [yellow]⚠[/] param_importances: {e}")
+        # 3. Parameter Importances (one per objective for multi-objective)
+        for suffix, name, target in objectives:
+            filename = (
+                f"param_importances_{suffix}.html"
+                if is_multi_objective
+                else "param_importances.html"
+            )
+            status.update(f"[bold green]Generating {filename}...")
+            try:
+                if target:
+                    fig = plot_param_importances(study, target=target, target_name=name)
+                else:
+                    fig = plot_param_importances(study)
+                fig.write_html(output_path / filename)
+                plots_generated.append(filename)
+                console.print(f"  [green]✓[/] {filename}")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/] {filename}: {e}")
 
-        # 4. Parallel Coordinate
-        status.update("[bold green]Generating parallel coordinate...")
-        try:
-            fig = plot_parallel_coordinate(study)
-            fig.write_html(output_path / "parallel_coordinate.html")
-            plots_generated.append("parallel_coordinate.html")
-            console.print("  [green]✓[/] parallel_coordinate.html")
-        except Exception as e:
-            console.print(f"  [yellow]⚠[/] parallel_coordinate: {e}")
+        # 4. Parallel Coordinate (one per objective for multi-objective)
+        for suffix, name, target in objectives:
+            filename = (
+                f"parallel_coordinate_{suffix}.html"
+                if is_multi_objective
+                else "parallel_coordinate.html"
+            )
+            status.update(f"[bold green]Generating {filename}...")
+            try:
+                if target:
+                    fig = plot_parallel_coordinate(
+                        study, target=target, target_name=name
+                    )
+                else:
+                    fig = plot_parallel_coordinate(study)
+                fig.write_html(output_path / filename)
+                plots_generated.append(filename)
+                console.print(f"  [green]✓[/] {filename}")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/] {filename}: {e}")
 
-        # 5. Contour
-        status.update("[bold green]Generating contour plot...")
-        try:
-            params = list(completed[0].params.keys()) if completed else []
-            weight_params = [p for p in params if "max_weight" in p]
-            if len(weight_params) >= 2:
-                fig = plot_contour(study, params=weight_params[:2])
-            else:
-                fig = plot_contour(study)
-            fig.write_html(output_path / "contour.html")
-            plots_generated.append("contour.html")
-            console.print("  [green]✓[/] contour.html")
-        except Exception as e:
-            console.print(f"  [yellow]⚠[/] contour: {e}")
+        # 5. Contour (one per objective for multi-objective)
+        for suffix, name, target in objectives:
+            filename = (
+                f"contour_{suffix}.html" if is_multi_objective else "contour.html"
+            )
+            status.update(f"[bold green]Generating {filename}...")
+            try:
+                params = list(completed[0].params.keys()) if completed else []
+                weight_params = [p for p in params if "max_weight" in p]
+                if target:
+                    if len(weight_params) >= 2:
+                        fig = plot_contour(
+                            study,
+                            params=weight_params[:2],
+                            target=target,
+                            target_name=name,
+                        )
+                    else:
+                        fig = plot_contour(study, target=target, target_name=name)
+                else:
+                    if len(weight_params) >= 2:
+                        fig = plot_contour(study, params=weight_params[:2])
+                    else:
+                        fig = plot_contour(study)
+                fig.write_html(output_path / filename)
+                plots_generated.append(filename)
+                console.print(f"  [green]✓[/] {filename}")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/] {filename}: {e}")
 
-        # 6. Slice
-        status.update("[bold green]Generating slice plot...")
-        try:
-            fig = plot_slice(study)
-            fig.write_html(output_path / "slice.html")
-            plots_generated.append("slice.html")
-            console.print("  [green]✓[/] slice.html")
-        except Exception as e:
-            console.print(f"  [yellow]⚠[/] slice: {e}")
+        # 6. Slice (one per objective for multi-objective)
+        for suffix, name, target in objectives:
+            filename = f"slice_{suffix}.html" if is_multi_objective else "slice.html"
+            status.update(f"[bold green]Generating {filename}...")
+            try:
+                if target:
+                    fig = plot_slice(study, target=target, target_name=name)
+                else:
+                    fig = plot_slice(study)
+                fig.write_html(output_path / filename)
+                plots_generated.append(filename)
+                console.print(f"  [green]✓[/] {filename}")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/] {filename}: {e}")
 
-        # 7. Timeline
+        # 7. Timeline (same for all objectives)
         status.update("[bold green]Generating timeline...")
         try:
             fig = plot_timeline(study)
@@ -2105,7 +2179,11 @@ def visualize_study(
     if open_browser and plots_generated:
         import webbrowser
 
-        main_plot = output_path / "optimization_history.html"
+        # For multi-objective, open Pareto front first (most useful view)
+        if is_multi_objective:
+            main_plot = output_path / "pareto_front.html"
+        else:
+            main_plot = output_path / "optimization_history.html"
         console.print(f"\n[dim]Opening {main_plot} in browser...[/]")
         webbrowser.open(f"file://{main_plot.absolute()}")
 

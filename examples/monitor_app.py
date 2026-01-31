@@ -196,9 +196,16 @@ def get_optimization_history() -> go.Figure:
         return create_empty_figure(f"Need at least 2 trials (have {len(completed)})")
 
     try:
-        fig = plot_optimization_history(study)
+        # For multi-objective, plot KL divergence (first objective)
+        if len(study.directions) > 1:
+            target = lambda t: t.values[0] if t.values else float("inf")
+            fig = plot_optimization_history(
+                study, target=target, target_name="KL Divergence"
+            )
+        else:
+            fig = plot_optimization_history(study)
         fig.update_layout(
-            title="Optimization History",
+            title="Optimization History (KL Divergence)",
             template="plotly_white",
         )
         return fig
@@ -223,7 +230,10 @@ def get_pareto_front() -> go.Figure:
         return create_empty_figure(f"Need at least 2 trials (have {len(completed)})")
 
     try:
-        fig = plot_pareto_front(study)
+        fig = plot_pareto_front(
+            study,
+            target_names=["KL Divergence", "Refusals"],
+        )
         fig.update_layout(
             title="Pareto Front (KL Divergence vs Refusals)",
             template="plotly_white",
@@ -249,9 +259,18 @@ def get_param_importances() -> go.Figure:
         )
 
     try:
-        fig = plot_param_importances(study)
+        # For multi-objective, plot importance for refusals (usually more interesting)
+        if len(study.directions) > 1:
+            target = (
+                lambda t: t.values[1]
+                if t.values and len(t.values) > 1
+                else float("inf")
+            )
+            fig = plot_param_importances(study, target=target, target_name="Refusals")
+        else:
+            fig = plot_param_importances(study)
         fig.update_layout(
-            title="Parameter Importances",
+            title="Parameter Importances (for Refusals)",
             template="plotly_white",
         )
         return fig
@@ -273,7 +292,14 @@ def get_parallel_coordinate() -> go.Figure:
         return create_empty_figure(f"Need at least 2 trials (have {len(completed)})")
 
     try:
-        fig = plot_parallel_coordinate(study)
+        # For multi-objective, plot for KL divergence
+        if len(study.directions) > 1:
+            target = lambda t: t.values[0] if t.values else float("inf")
+            fig = plot_parallel_coordinate(
+                study, target=target, target_name="KL Divergence"
+            )
+        else:
+            fig = plot_parallel_coordinate(study)
         fig.update_layout(
             title="Parallel Coordinate Plot",
             template="plotly_white",

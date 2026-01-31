@@ -72,68 +72,128 @@ def generate_plots(
         print("Error: Need at least 2 completed trials for visualization")
         sys.exit(1)
 
+    # Check if multi-objective
+    is_multi_objective = len(study.directions) > 1
+    if is_multi_objective:
+        print(f"Multi-objective study detected ({len(study.directions)} objectives)")
+        print("  Objective 0: KL Divergence (minimize)")
+        print("  Objective 1: Refusals (minimize)")
+        # Target functions for each objective
+        target_kl = lambda t: t.values[0] if t.values else float("inf")
+        target_refusals = (
+            lambda t: t.values[1] if t.values and len(t.values) > 1 else float("inf")
+        )
+        objectives = [
+            ("kl", "KL Divergence", target_kl),
+            ("refusals", "Refusals", target_refusals),
+        ]
+    else:
+        objectives = [("value", "Objective", None)]
+
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nSaving plots to {output_dir}/")
 
-    # 1. Optimization History
-    print("  Generating optimization_history.html...")
-    try:
-        fig = plot_optimization_history(study)
-        fig.write_html(output_dir / "optimization_history.html")
-    except Exception as e:
-        print(f"    Warning: Could not generate optimization history: {e}")
+    # 1. Optimization History (one per objective for multi-objective)
+    for suffix, name, target in objectives:
+        filename = (
+            f"optimization_history_{suffix}.html"
+            if is_multi_objective
+            else "optimization_history.html"
+        )
+        print(f"  Generating {filename}...")
+        try:
+            if target:
+                fig = plot_optimization_history(study, target=target, target_name=name)
+            else:
+                fig = plot_optimization_history(study)
+            fig.write_html(output_dir / filename)
+        except Exception as e:
+            print(f"    Warning: Could not generate optimization history: {e}")
 
-    # 2. Pareto Front (for multi-objective)
-    if len(study.directions) > 1:
+    # 2. Pareto Front (for multi-objective only)
+    if is_multi_objective:
         print("  Generating pareto_front.html...")
         try:
-            fig = plot_pareto_front(study)
+            fig = plot_pareto_front(
+                study,
+                target_names=["KL Divergence", "Refusals"],
+            )
             fig.write_html(output_dir / "pareto_front.html")
         except Exception as e:
             print(f"    Warning: Could not generate pareto front: {e}")
 
-    # 3. Parameter Importances
-    print("  Generating param_importances.html...")
-    try:
-        fig = plot_param_importances(study)
-        fig.write_html(output_dir / "param_importances.html")
-    except Exception as e:
-        print(f"    Warning: Could not generate param importances: {e}")
-
-    # 4. Parallel Coordinate
-    print("  Generating parallel_coordinate.html...")
-    try:
-        fig = plot_parallel_coordinate(study)
-        fig.write_html(output_dir / "parallel_coordinate.html")
-    except Exception as e:
-        print(f"    Warning: Could not generate parallel coordinate: {e}")
-
-    # 5. Contour plots for key parameter pairs
-    print("  Generating contour.html...")
-    try:
-        # Get parameter names from first trial
-        if completed:
-            params = list(completed[0].params.keys())
-            # Pick two important parameters for contour
-            weight_params = [p for p in params if "max_weight" in p]
-            if len(weight_params) >= 2:
-                fig = plot_contour(study, params=weight_params[:2])
+    # 3. Parameter Importances (one per objective for multi-objective)
+    for suffix, name, target in objectives:
+        filename = (
+            f"param_importances_{suffix}.html"
+            if is_multi_objective
+            else "param_importances.html"
+        )
+        print(f"  Generating {filename}...")
+        try:
+            if target:
+                fig = plot_param_importances(study, target=target, target_name=name)
             else:
-                fig = plot_contour(study)
-            fig.write_html(output_dir / "contour.html")
-    except Exception as e:
-        print(f"    Warning: Could not generate contour plot: {e}")
+                fig = plot_param_importances(study)
+            fig.write_html(output_dir / filename)
+        except Exception as e:
+            print(f"    Warning: Could not generate param importances: {e}")
 
-    # 6. Slice plots
-    print("  Generating slice.html...")
-    try:
-        fig = plot_slice(study)
-        fig.write_html(output_dir / "slice.html")
-    except Exception as e:
-        print(f"    Warning: Could not generate slice plot: {e}")
+    # 4. Parallel Coordinate (one per objective for multi-objective)
+    for suffix, name, target in objectives:
+        filename = (
+            f"parallel_coordinate_{suffix}.html"
+            if is_multi_objective
+            else "parallel_coordinate.html"
+        )
+        print(f"  Generating {filename}...")
+        try:
+            if target:
+                fig = plot_parallel_coordinate(study, target=target, target_name=name)
+            else:
+                fig = plot_parallel_coordinate(study)
+            fig.write_html(output_dir / filename)
+        except Exception as e:
+            print(f"    Warning: Could not generate parallel coordinate: {e}")
 
-    # 7. Timeline
+    # 5. Contour plots (one per objective for multi-objective)
+    for suffix, name, target in objectives:
+        filename = f"contour_{suffix}.html" if is_multi_objective else "contour.html"
+        print(f"  Generating {filename}...")
+        try:
+            params = list(completed[0].params.keys()) if completed else []
+            weight_params = [p for p in params if "max_weight" in p]
+            if target:
+                if len(weight_params) >= 2:
+                    fig = plot_contour(
+                        study, params=weight_params[:2], target=target, target_name=name
+                    )
+                else:
+                    fig = plot_contour(study, target=target, target_name=name)
+            else:
+                if len(weight_params) >= 2:
+                    fig = plot_contour(study, params=weight_params[:2])
+                else:
+                    fig = plot_contour(study)
+            fig.write_html(output_dir / filename)
+        except Exception as e:
+            print(f"    Warning: Could not generate contour plot: {e}")
+
+    # 6. Slice plots (one per objective for multi-objective)
+    for suffix, name, target in objectives:
+        filename = f"slice_{suffix}.html" if is_multi_objective else "slice.html"
+        print(f"  Generating {filename}...")
+        try:
+            if target:
+                fig = plot_slice(study, target=target, target_name=name)
+            else:
+                fig = plot_slice(study)
+            fig.write_html(output_dir / filename)
+        except Exception as e:
+            print(f"    Warning: Could not generate slice plot: {e}")
+
+    # 7. Timeline (same for all objectives)
     print("  Generating timeline.html...")
     try:
         fig = plot_timeline(study)
@@ -142,7 +202,15 @@ def generate_plots(
         print(f"    Warning: Could not generate timeline: {e}")
 
     print("\nDone! Open the HTML files in a browser to view the plots.")
-    print(f"\nQuick view: open {output_dir / 'optimization_history.html'}")
+    if is_multi_objective:
+        print("\nQuick view:")
+        print(f"  open {output_dir / 'pareto_front.html'}  (trade-off view)")
+        print(f"  open {output_dir / 'optimization_history_kl.html'}  (KL progress)")
+        print(
+            f"  open {output_dir / 'optimization_history_refusals.html'}  (refusals progress)"
+        )
+    else:
+        print(f"\nQuick view: open {output_dir / 'optimization_history.html'}")
 
 
 def main() -> None:
