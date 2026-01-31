@@ -79,8 +79,9 @@ heretic --model Qwen/Qwen2.5-70B-Instruct \
 |------|-----|------|---------------|-----------|
 | 7B | 24GB | 100GB | ✅ Yes | ❌ No |
 | 13B | 24GB | 150GB | ❌ No | ❌ No |
-| 32B | 80GB | **200GB** | ❌ No | ✅ Yes |
-| 70B | 80GB | **300GB** | ❌ No | ✅ Yes |
+| 32B | **H200 141GB** | **200GB** | ✅ Yes | ✅ Yes |
+| 32B | H100 80GB | **200GB** | ❌ No | ✅ Yes |
+| 70B | 80GB+ | **300GB** | ❌ No | ✅ Yes |
 
 **Note:** v1.1.0+ streams C4 on-demand (~0GB overhead). Network required during dataset loading.
 

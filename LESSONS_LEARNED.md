@@ -644,18 +644,35 @@ max_batch_size = 128
 
 ## Recommendation for 32B Models
 
-**DO NOT use 4x RTX 4090 for 32B models.** Use A100 80GB instead.
+**Use H200 141GB for 32B models with weight caching enabled.** H100 80GB does NOT fit.
 
-**Why:**
-- 4x RTX 4090: ~30-35 hours, $47-55 total cost, frequent crashes
-- 1x A100 80GB: ~12-15 hours, $23-28 total cost, stable
-- A100 enables weight caching, iterative ablation, larger batches
-- No multi-GPU complexity, meta device errors, or memory fragmentation
+**Why H200 vs H100:**
+- 32B model weights: ~64GB
+- Layer-wise cache: ~28GB
+- Total needed: ~92GB
+- **H100 80GB: 92GB > 80GB = OOM** ❌
+- **H200 141GB: 92GB < 141GB = Works** ✅
 
-**How to get A100 80GB:**
-1. **Vast.ai:** Run `.\scripts\monitor_a100.ps1` to auto-alert when available
-2. **RunPod:** Check https://www.runpod.io/console/pods (usually has better availability)
-3. **Lambda Labs:** Check https://lambdalabs.com/service/gpu-cloud (A100 @ $1.29/hr)
+**Performance comparison:**
+| GPU | Cache | Reload Time | 200-Trial Run | Cost |
+|-----|-------|-------------|---------------|------|
+| H100 80GB | ❌ Disabled | 60-120s/trial | ~13-15 hours | ~$26-30 |
+| H200 141GB | ✅ Enabled | 10-15s/trial | ~9-11 hours | ~$19-24 |
+| 4x RTX 4090 | ❌ Disabled | 30s/trial | ~30-35 hours | ~$47-55 |
+
+**How to get H200:**
+```bash
+# Search Vast.ai for H200 with 200GB disk
+vastai search offers "gpu_name=H200 disk_space>=200 rentable=true" --order dph_total
+
+# Create instance
+vastai create instance <OFFER_ID> --disk 200 --image pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+```
+
+**Fallback options:**
+1. **H100 80GB:** Works but must use `--cache-weights false` (slower)
+2. **RunPod:** Check https://www.runpod.io/console/pods
+3. **Lambda Labs:** Check https://lambdalabs.com/service/gpu-cloud
 
 See `scripts/setup_runpod_a100.md` for RunPod setup instructions.
 

@@ -87,6 +87,14 @@ uv run heretic-vast watch             # Monitor progress
 uv run heretic-vast stop              # Stop instance
 ```
 
+**⚠️ FALLBACK: If heretic-vast create fails to find GPUs, use direct vastai CLI:**
+```bash
+# heretic-vast may report "No offers available" even when GPUs exist
+# Use direct vastai CLI as fallback:
+vastai search offers "gpu_name=H200 disk_space>=200 rentable=true" --order dph_total
+vastai create instance <OFFER_ID> --disk 200 --image pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+```
+
 **Full training command with RESUME SUPPORT:**
 ```bash
 uv run heretic-vast exec "export HF_HOME=/workspace/.cache/huggingface && cd /workspace && nohup heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --auto-select true --auto-select-path /workspace/models --storage sqlite:////workspace/heretic_study.db --study-name qwen32b-abliteration > /workspace/heretic.log 2>&1 &"
@@ -540,7 +548,7 @@ import json; p='models/MODEL/tokenizer_config.json'; c=json.load(open(p,encoding
 
 **Current Solution (v1.2.0+):** Selective layer-wise caching reduces cache memory by 55-75%:
 ```bash
-# This NOW WORKS! (previously caused OOM)
+# This NOW WORKS on H200! (previously caused OOM)
 heretic --model Qwen/Qwen2.5-Coder-32B-Instruct \
   --cache-weights true \
   --n-trials 200
@@ -549,20 +557,36 @@ heretic --model Qwen/Qwen2.5-Coder-32B-Instruct \
 # * Cache size: 28.4 GB (14,874,368,000 params, 43.2% of model)
 ```
 
+**⚠️ CRITICAL: H100 80GB vs H200 141GB for 32B Models**
+
+| GPU | VRAM | Model (64GB) + Cache (28GB) | Result |
+|-----|------|----------------------------|--------|
+| **H100 80GB** | 80GB | 92GB needed | ❌ **OOM - Does NOT fit** |
+| **H200 141GB** | 141GB | 92GB needed | ✅ **Works with caching** |
+
+**Why H100 80GB fails with cache-weights:**
+- 32B model weights: ~64GB
+- Layer-wise cache: ~28GB
+- Total needed: ~92GB > 80GB available
+- Error: `ModelLoadError: Insufficient memory to create weight cache`
+
 **Memory breakdown (32B model on 141GB H200):**
-- Model weights: 62GB
+- Model weights: 62-64GB
 - Layer-wise cache: ~28GB (vs 62GB full cache)
 - HuggingFace cache: 5-10GB
 - Working memory: 10GB
 - **Total: ~105-110GB** ✅ Fits comfortably on 141GB GPU
 
-**Fallback (if still encountering OOM):**
+**GPU Selection for 32B Models:**
 ```bash
-# Disable caching only if GPU has <100GB memory
-heretic --model MODEL --cache-weights false
+# H200 141GB - RECOMMENDED for 32B with caching
+vastai search offers "gpu_name=H200 disk_space>=200 rentable=true" --order dph_total
+
+# H100 80GB - Only works WITHOUT caching (slower)
+heretic --model Qwen/Qwen2.5-Coder-32B-Instruct --cache-weights false
 ```
 
-**Benefits of layer-wise caching:**
+**Benefits of layer-wise caching (H200 only for 32B):**
 - 6-12x faster reload (10-15s vs 60-120s disk reload)
 - Saves 3-4 hours per 200-trial run
 - ~$6-8 cost savings on cloud GPUs
@@ -611,12 +635,16 @@ heretic --model MODEL --ensemble-probe-pca false --use-pca-extraction true
 
 **Cause:** C4 and other multi-variant datasets require an explicit config parameter (e.g., "en", "realnewslike").
 
-**Solution:** Add config to CLI command or TOML file:
+**Solution:** Pass ALL unhelpfulness_prompts fields via CLI:
 ```bash
-# Via CLI (recommended - overrides TOML)
-heretic --model MODEL --unhelpfulness-prompts.config en
+# Via CLI - must pass ALL four fields together
+heretic --model MODEL \
+  --unhelpfulness-prompts.dataset allenai/c4 \
+  --unhelpfulness-prompts.config en \
+  --unhelpfulness-prompts.split "train[:200]" \
+  --unhelpfulness-prompts.column text
 
-# Via TOML (only works if not overridden by CLI)
+# Via TOML (alternative - no CLI args for unhelpfulness_prompts)
 [unhelpfulness_prompts]
 dataset = "allenai/c4"
 config = "en"
@@ -624,7 +652,7 @@ split = "train[:200]"
 column = "text"
 ```
 
-**Important:** CLI arguments ALWAYS override TOML config. If you pass `--unhelpfulness-prompts.dataset` on CLI, you must also pass `--unhelpfulness-prompts.config` or it defaults to `None`.
+**Important:** CLI arguments ALWAYS override TOML config. If you pass ANY `--unhelpfulness-prompts.*` field on CLI, you must pass ALL of them or validation fails.
 
 ### C4 Dataset Disk Space Requirements
 
@@ -741,6 +769,24 @@ cd /workspace/empty_dir && heretic --model MODEL
 ```
 
 **Best Practice:** Either pass ALL settings via CLI, OR ensure no CLI defaults conflict with TOML.
+
+### unhelpfulness_prompts CLI Fields (CRITICAL)
+**Problem:** Passing ANY unhelpfulness_prompts field via CLI requires ALL fields.
+
+**Error:** `validation error for DatasetSpecification - Field required`
+
+**Solution:** When using CLI for C4 dataset, pass ALL four fields:
+```bash
+# This FAILS - missing fields
+heretic --model MODEL --unhelpfulness-prompts.config en
+
+# This WORKS - all fields specified
+heretic --model MODEL \
+  --unhelpfulness-prompts.dataset allenai/c4 \
+  --unhelpfulness-prompts.config en \
+  --unhelpfulness-prompts.split "train[:200]" \
+  --unhelpfulness-prompts.column text
+```
 
 ---
 

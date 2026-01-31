@@ -206,6 +206,23 @@ uv run heretic-vast start
 uv run heretic-vast download /workspace/models
 ```
 
+### Direct vastai CLI (When heretic-vast Fails to Find GPUs)
+
+**Problem:** `heretic-vast create` may report "No offers available" even when GPUs exist.
+
+**Solution:** Use direct `vastai` CLI as fallback:
+```bash
+# Search for H200 with 200GB disk
+vastai search offers "gpu_name=H200 disk_space>=200 rentable=true" --order dph_total
+
+# Create instance with specific offer ID
+vastai create instance <OFFER_ID> --disk 200 --image pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+
+# Then use heretic-vast for setup/monitoring
+uv run heretic-vast list
+uv run heretic-vast setup
+```
+
 ### Direct SSH Commands (When heretic-vast Fails)
 
 ```bash
@@ -278,7 +295,8 @@ Get your API key from: https://cloud.vast.ai/account/
 | A100_40GB | 40GB | $1.00/hr | 14B-32B models |
 | A100_80GB | 80GB | $2.00/hr | 32B-70B models |
 | A100_SXM | 80GB | $2.50/hr | 70B+ (fastest) |
-| H100 | 80GB | $4.00/hr | 70B+ (latest) |
+| H100 | 80GB | $4.00/hr | 32B (no cache) or 70B+ |
+| H200 | 141GB | $2.00-2.50/hr | **32B with cache** (recommended) |
 
 ### Command Reference
 
@@ -496,19 +514,28 @@ ssh -p PORT root@HOST 'ls -la /workspace/*.db'
 
 **RESOLVED in v1.2.0+** - Layer-wise caching now enables weight caching for 32B models!
 
+**⚠️ CRITICAL: H100 80GB vs H200 141GB**
+
+| GPU | VRAM | 32B + Cache (92GB) | Recommendation |
+|-----|------|-------------------|----------------|
+| **H100 80GB** | 80GB | ❌ Does NOT fit | Use `--cache-weights false` |
+| **H200 141GB** | 141GB | ✅ Fits | Use `--cache-weights true` |
+
 ```bash
-# This NOW WORKS! (v1.2.0+)
+# H200 141GB - USE THIS for 32B with caching
 heretic --model Qwen/Qwen2.5-Coder-32B-Instruct \
   --cache-weights true \
   --n-trials 200
 
-# Benefits:
+# H100 80GB - Must disable caching (slower but works)
+heretic --model Qwen/Qwen2.5-Coder-32B-Instruct \
+  --cache-weights false \
+  --n-trials 200
+
+# Benefits of caching (H200 only for 32B):
 # - 6-12x faster reload (10-15s vs 60-120s disk)
 # - Saves 3-4 hours per 200-trial run
 # - Cache memory reduced 55-75% (28GB vs 62GB)
-
-# Only disable if GPU has <100GB memory
-heretic --model MODEL --cache-weights false
 ```
 
 ### SSH Authentication Failures
