@@ -811,6 +811,7 @@ class TestModelPCAExtraction:
         # Results should differ with different alpha
         assert not torch.allclose(result_alpha_0.directions, result_alpha_1.directions)
 
+    @pytest.mark.slow
     def test_get_refusal_directions_pca_gpu_performance(self):
         """Test GPU-accelerated PCA performance on realistic dimensions."""
         import time
@@ -827,9 +828,7 @@ class TestModelPCAExtraction:
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        good_residuals = torch.randn(
-            n_samples, n_layers, hidden_dim, device=device
-        )
+        good_residuals = torch.randn(n_samples, n_layers, hidden_dim, device=device)
         bad_residuals = torch.randn(n_samples, n_layers, hidden_dim, device=device)
 
         # Measure execution time
@@ -849,9 +848,9 @@ class TestModelPCAExtraction:
         # Performance expectation: GPU should be <30s for 64 layers
         # CPU fallback allowed to take longer
         if device == "cuda":
-            assert (
-                elapsed < 30
-            ), f"GPU PCA took {elapsed:.1f}s (expected <30s for test dimensions)"
+            assert elapsed < 30, (
+                f"GPU PCA took {elapsed:.1f}s (expected <30s for test dimensions)"
+            )
             print(f"\nGPU PCA performance: {elapsed:.2f}s for {n_layers} layers")
         else:
             print(f"\nCPU PCA (fallback): {elapsed:.2f}s for {n_layers} layers")
