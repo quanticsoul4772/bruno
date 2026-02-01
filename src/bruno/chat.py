@@ -131,15 +131,17 @@ class BrunoChat:
                 bnb_4bit_use_double_quant=True,
             )
 
-        # Load model
+        # Load model (pass token if available)
+        token = os.environ.get("HF_TOKEN")
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="auto",
             quantization_config=quantization_config,
             torch_dtype="auto" if not use_4bit else None,
+            token=token,
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
 
         # Setup streaming output
         self.streamer = TextStreamer(
