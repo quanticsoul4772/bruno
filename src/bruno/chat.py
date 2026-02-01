@@ -194,12 +194,16 @@ class BrunoChat:
 
         inputs = inputs.to(self.model.device)
 
+        # Create attention mask
+        attention_mask = torch.ones_like(inputs)
+
         # Generate with streaming
         rich_print("[bold cyan]Bruno:[/] ", end="")
 
         try:
             outputs = self.model.generate(
                 inputs,
+                attention_mask=attention_mask,
                 max_new_tokens=self.max_new_tokens,
                 do_sample=True,
                 temperature=self.temperature,
