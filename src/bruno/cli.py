@@ -8,7 +8,23 @@ Provides subcommands:
 - chat: Interactive chat with abliterated models
 """
 
+import os
 import sys
+
+# Set environment variables before any HuggingFace imports
+os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
+# Set HF_TOKEN from .env if not already set
+if "HF_TOKEN" not in os.environ:
+    env_file = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(env_file):
+        with open(env_file) as f:
+            for line in f:
+                if line.startswith("HF_TOKEN="):
+                    token = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    os.environ["HF_TOKEN"] = token
+                    break
 
 import click
 
