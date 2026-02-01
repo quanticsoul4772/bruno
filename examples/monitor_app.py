@@ -529,8 +529,10 @@ def get_optimization_history(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # For multi-objective, plot KL divergence (first objective)
         if len(study.directions) > 1:
+
             def target(t):
                 return t.values[0] if t.values else float("inf")
+
             fig = plot_optimization_history(
                 study, target=target, target_name="KL Divergence"
             )
@@ -603,10 +605,10 @@ def get_param_importances(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # For multi-objective, plot importance for refusals (usually more interesting)
         if len(study.directions) > 1:
+
             def target(t):
-                return (t.values[1]
-                            if t.values and len(t.values) > 1
-                            else float("inf"))
+                return t.values[1] if t.values and len(t.values) > 1 else float("inf")
+
             fig = plot_param_importances(study, target=target, target_name="Refusals")
         else:
             fig = plot_param_importances(study)
@@ -640,8 +642,10 @@ def get_parallel_coordinate(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # For multi-objective, plot for KL divergence
         if len(study.directions) > 1:
+
             def target(t):
                 return t.values[0] if t.values else float("inf")
+
             fig = plot_parallel_coordinate(
                 study, target=target, target_name="KL Divergence"
             )

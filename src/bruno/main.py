@@ -125,6 +125,12 @@ def run():
     print("[dim]Named after Giordano Bruno (1548-1600) - Infinite possibilities[/]")
     print()
 
+    # Proactively clean stale HuggingFace lock files at startup
+    # This prevents hangs that are often misdiagnosed as network timeouts
+    from .hf_utils import ensure_clean_cache
+
+    ensure_clean_cache(verbose=True)
+
     if (
         # An odd number of arguments have been passed (argv[0] is the program name),
         # so that after accounting for "--param VALUE" pairs, there is one left over.
@@ -808,7 +814,10 @@ def run():
     # This ensures we pick the trial with lowest KL when multiple trials have 0 refusals.
     best_trials = sorted(
         study.best_trials,
-        key=lambda trial: (trial.user_attrs["refusals"], trial.user_attrs["kl_divergence"]),
+        key=lambda trial: (
+            trial.user_attrs["refusals"],
+            trial.user_attrs["kl_divergence"],
+        ),
     )
 
     choices = [
