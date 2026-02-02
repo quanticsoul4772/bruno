@@ -410,25 +410,44 @@ def run():
     # Phase 5: CAA - Extract compliance direction (uses bad_residuals)
     if settings.use_caa:
         print("* Extracting compliance direction for CAA...")
-        # Reuse cached bad_residuals instead of recomputing
-        caa_result = model.get_compliance_directions_from_responses(
-            bad_prompts,
-            bad_residuals,
-            evaluator,
-        )
-        if caa_result is not None:
-            compliant_residuals, refusing_residuals = caa_result
-            compliance_direction = model.extract_compliance_direction(
-                compliant_residuals,
-                refusing_residuals,
+        # Clear GPU memory before CAA extraction - this operation is memory-intensive
+        # because it generates responses which requires large logit tensors
+        empty_cache()
+        try:
+            # Reuse cached bad_residuals instead of recomputing
+            caa_result = model.get_compliance_directions_from_responses(
+                bad_prompts,
+                bad_residuals,
+                evaluator,
             )
-            print("  * Compliance direction extracted")
-        else:
+            if caa_result is not None:
+                compliant_residuals, refusing_residuals = caa_result
+                compliance_direction = model.extract_compliance_direction(
+                    compliant_residuals,
+                    refusing_residuals,
+                )
+                print("  * Compliance direction extracted")
+            else:
+                print(
+                    "[yellow]  * CAA extraction failed: insufficient samples (need 10+ refusals and 10+ compliant)[/yellow]"
+                )
+                print("[yellow]  * Continuing without CAA[/yellow]")
+                compliance_direction = None
+        except torch.cuda.OutOfMemoryError:
+            mem_info = get_gpu_memory_info()
             print(
-                "[yellow]  * CAA extraction failed: insufficient samples (need 10+ refusals and 10+ compliant)[/yellow]"
+                "[yellow]  * CAA extraction failed: GPU OOM during response generation[/yellow]"
+            )
+            print(
+                f"[yellow]  * GPU Memory: {mem_info['used_gb']:.1f}/{mem_info['total_gb']:.1f} GB used[/yellow]"
+            )
+            print(
+                "[yellow]  * CAA requires generating responses which needs significant memory for logits[/yellow]"
             )
             print("[yellow]  * Continuing without CAA[/yellow]")
             compliance_direction = None
+            # Clean up after OOM
+            empty_cache()
 
     # =========================================================================
     # CRITICAL: Release the cached residuals NOW - all advanced features that
