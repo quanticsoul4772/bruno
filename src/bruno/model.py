@@ -34,6 +34,7 @@ from .constants import (
 )
 from .error_tracker import record_suppressed_error
 from .exceptions import (
+    ConceptConeError,
     ConfigurationError,
     ModelInferenceError,
     ModelLoadError,
@@ -1967,7 +1968,7 @@ class Model:
         bad_prompts: list[str],
         evaluator: "Evaluator",
         min_probe_accuracy: float = 0.65,
-    ) -> SupervisedExtractionResult | PCAExtractionResult:
+    ) -> SupervisedExtractionResult:
         """Extract refusal directions using supervised probing.
 
         Unlike PCA which finds variance directions, this finds the actual
@@ -1979,7 +1980,7 @@ class Model:
         3. Trains a logistic regression probe per layer
         4. Uses the learned weights as refusal directions
 
-        Falls back to PCA extraction if:
+        Raises SupervisedProbeError if:
         - Insufficient class balance (< 10 samples per class)
         - Mean probe accuracy below min_probe_accuracy threshold
 
@@ -1994,7 +1995,11 @@ class Model:
                 Falls back to PCA if mean accuracy is below this threshold
 
         Returns:
-            SupervisedExtractionResult if successful, or PCAExtractionResult as fallback
+            SupervisedExtractionResult containing directions and accuracies
+
+        Raises:
+            SupervisedProbeError: If class imbalance (< 10 samples per class) or
+                mean probe accuracy below min_probe_accuracy threshold
         """
         n_layers = good_residuals.shape[1]
         device = good_residuals.device
@@ -2030,12 +2035,11 @@ class Model:
         )
 
         if n_refusals < 10 or n_comply < 10:
-            print(
-                f"[yellow]Warning: Imbalanced classes (refusals={n_refusals}, comply={n_comply}). "
-                f"Falling back to PCA extraction.[/yellow]"
-            )
-            return self.get_refusal_directions_pca(
-                good_residuals, bad_residuals, n_components=1
+            raise SupervisedProbeError(
+                f"Class imbalance prevents supervised probing: refusals={n_refusals}, comply={n_comply}. "
+                f"Need at least 10 samples per class. Either your bad_prompts dataset doesn't trigger "
+                f"enough refusals, or the model complies with too many harmful prompts. "
+                f"Try using a different bad_prompts dataset or disable supervised probing."
             )
 
         # Separate residuals by actual behavior
@@ -2123,14 +2127,13 @@ class Model:
             f"  * Probe accuracies: min={min_acc:.2f}, max={max_acc:.2f}, mean={mean_acc:.2f}"
         )
 
-        # Check accuracy threshold - fall back to PCA if too low
+        # Check accuracy threshold - raise error if too low
         if mean_acc < min_probe_accuracy:
-            print(
-                f"[yellow]Warning: Mean probe accuracy ({mean_acc:.2f}) below threshold "
-                f"({min_probe_accuracy}). Falling back to PCA extraction.[/yellow]"
-            )
-            return self.get_refusal_directions_pca(
-                good_residuals, bad_residuals, n_components=1
+            raise SupervisedProbeError(
+                f"Probe accuracy ({mean_acc:.2f}) below threshold ({min_probe_accuracy}). "
+                f"The model's internal representations don't clearly distinguish refusal from compliance. "
+                f"This may indicate the model uses different mechanisms for refusal, or the prompts "
+                f"don't trigger consistent behavior. Try lowering min_probe_accuracy or disable supervised probing."
             )
 
         return SupervisedExtractionResult(
@@ -2290,16 +2293,16 @@ class Model:
         min_cone_size: int = 10,
         directions_per_cone: int = 2,
         min_silhouette_score: float = 0.1,
-    ) -> ConceptConeExtractionResult | PCAExtractionResult:
+    ) -> ConceptConeExtractionResult:
         """Extract refusal directions using concept cone clustering.
 
         Clusters harmful prompts by their residual patterns to identify
         different categories of harmful content (e.g., violence, fraud,
         self-harm), then extracts category-specific refusal directions.
 
-        Falls back to standard PCA if:
-        - Not enough samples for clustering
+        Raises ConceptConeError if:
         - Silhouette score below threshold (poor clustering quality)
+        - No valid cones extracted (all clusters below min_cone_size)
 
         Args:
             good_residuals: Residuals from harmless prompts
@@ -2312,8 +2315,10 @@ class Model:
             min_silhouette_score: Minimum clustering quality score
 
         Returns:
-            ConceptConeExtractionResult if successful,
-            or PCAExtractionResult if fallback to global directions
+            ConceptConeExtractionResult containing extracted concept cones
+
+        Raises:
+            ConceptConeError: If silhouette score below threshold or no valid cones extracted
         """
         print("  * Extracting concept cones...")
 
@@ -2331,23 +2336,20 @@ class Model:
             result.silhouette_score < min_silhouette_score
             and result.n_clusters_valid > 1
         ):
-            print(
-                f"[yellow]Warning: Silhouette score ({result.silhouette_score:.3f}) "
-                f"below threshold ({min_silhouette_score}). "
-                f"Falling back to global PCA directions.[/yellow]"
-            )
-            return self.get_refusal_directions_pca(
-                good_residuals, bad_residuals, n_components=directions_per_cone
+            raise ConceptConeError(
+                f"Poor clustering quality: silhouette score ({result.silhouette_score:.3f}) "
+                f"below threshold ({min_silhouette_score}). The harmful prompts don't form "
+                f"distinct categories. This may indicate the prompts are too homogeneous or "
+                f"the model uses similar refusal patterns for all categories. "
+                f"Try lowering min_silhouette_score or disable concept cones."
             )
 
         # Check if we have any valid cones
         if not result.cones:
-            print(
-                "[yellow]Warning: No valid concept cones extracted. "
-                "Falling back to global PCA directions.[/yellow]"
-            )
-            return self.get_refusal_directions_pca(
-                good_residuals, bad_residuals, n_components=directions_per_cone
+            raise ConceptConeError(
+                "No valid concept cones extracted. All clusters were below the minimum size "
+                f"threshold ({min_cone_size}). Either increase the number of bad_prompts, "
+                f"lower min_cone_size, or disable concept cones."
             )
 
         return result
@@ -2460,20 +2462,10 @@ class Model:
         )
         pca_directions = pca_result.directions[:, 0, :]  # Shape: (n_layers, hidden_dim)
 
-        # Try supervised directions
+        # Get supervised directions (raises SupervisedProbeError on failure)
         supervised_result = self.get_refusal_directions_supervised(
             good_residuals, bad_residuals, bad_prompts, evaluator, min_probe_accuracy
         )
-
-        # Check if supervised probing succeeded or fell back to PCA
-        if isinstance(supervised_result, PCAExtractionResult):
-            raise SupervisedProbeError(
-                "Ensemble probe+PCA extraction failed: supervised probing returned PCA fallback. "
-                "This happens when there is class imbalance (< 10 samples per class) or "
-                f"probe accuracy is below {min_probe_accuracy}. Check that your bad_prompts "
-                "dataset contains prompts that trigger refusals."
-            )
-
         supervised_directions = supervised_result.directions
 
         # Weighted combination
