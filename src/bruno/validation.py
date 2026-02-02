@@ -22,7 +22,7 @@ from datasets import load_dataset
 from .error_tracker import record_suppressed_error
 from .exceptions import ValidationFileError
 from .logging import get_logger
-from .utils import print
+from .utils import empty_cache, print
 
 logger = get_logger(__name__)
 
@@ -485,6 +485,9 @@ class MMLUEvaluator:
         # Get responses (limit tokens since we only need the answer letter)
         responses = self.model.get_responses_batched(prompts, max_tokens=5)
 
+        # Clear GPU cache after batch processing to prevent memory accumulation
+        empty_cache()
+
         for ex, response in zip(test_examples, responses):
             predicted = self._extract_answer(response)
             expected = ex["answer"]
@@ -532,6 +535,8 @@ class MMLUEvaluator:
                 f"      * Accuracy: [bold]{result.accuracy:.1%}[/] "
                 f"({result.correct}/{result.total})"
             )
+            # Clear GPU cache between categories to prevent memory accumulation
+            empty_cache()
 
         return results
 
@@ -588,11 +593,16 @@ class AbliterationValidator:
         total = len(self.evaluator.bad_prompts)
         refusal_rate = refusals / total if total > 0 else 0.0
 
+        # Clear GPU cache after refusal counting to free memory before next operation
+        empty_cache()
+
         # KL divergence (0 for baseline by definition)
         if is_baseline:
             kl_divergence = 0.0
         else:
             kl_divergence = self.evaluator._compute_kl_divergence()
+            # Clear GPU cache after KL divergence computation
+            empty_cache()
 
         # MMLU evaluation
         mmlu_scores = {}

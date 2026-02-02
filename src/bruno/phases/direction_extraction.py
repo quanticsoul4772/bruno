@@ -72,8 +72,10 @@ def extract_refusal_directions(
     print("Calculating per-layer refusal directions...")
     print("* Obtaining residuals for good prompts...")
     good_residuals = model.get_residuals_batched(good_prompts)
+    empty_cache()  # Clear memory before loading more residuals
     print("* Obtaining residuals for bad prompts...")
     bad_residuals = model.get_residuals_batched(bad_prompts)
+    empty_cache()  # Clear memory after residual extraction
 
     direction_weights = settings.direction_weights
     refusal_directions_multi = None
@@ -153,6 +155,7 @@ def apply_helpfulness_orthogonalization(
     print(f"  * Loaded {len(unhelpful_prompts)} unhelpful prompts")
 
     helpful_residuals = model.get_residuals_batched(helpful_prompts)
+    empty_cache()  # Clear memory before loading more residuals
     unhelpful_residuals = model.get_residuals_batched(unhelpful_prompts)
 
     helpfulness_direction = model.extract_helpfulness_direction(
@@ -167,6 +170,7 @@ def apply_helpfulness_orthogonalization(
     )
 
     del helpful_residuals, unhelpful_residuals
+    empty_cache()  # Clear GPU memory after residual extraction
 
     return DirectionExtractionResult(
         refusal_directions=refusal_directions,

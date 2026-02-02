@@ -318,7 +318,133 @@ def run():
     use_multi_direction = direction_result.use_multi_direction
     direction_weights = direction_result.direction_weights or settings.direction_weights
 
+    # Convert layer profile configs to LayerRangeProfile objects (needed for some advanced features)
+    layer_profiles: list[LayerRangeProfile] | None = None
+    if settings.enable_layer_profiles and settings.layer_range_profiles:
+        layer_profiles = [
+            LayerRangeProfile(
+                range_start=p.range_start,
+                range_end=p.range_end,
+                weight_multiplier=p.weight_multiplier,
+            )
+            for p in settings.layer_range_profiles
+        ]
+        print()
+        print("Layer-range profiles enabled:")
+        for p in layer_profiles:
+            print(
+                f"  * Layers {p.range_start:.0%}-{p.range_end:.0%}: "
+                f"weight multiplier = {p.weight_multiplier:.2f}"
+            )
+
+    # =========================================================================
+    # MEMORY OPTIMIZATION: Run advanced features that need good_residuals and
+    # bad_residuals FIRST, then clear them BEFORE helpfulness orthogonalization.
+    # This prevents OOM by not holding ~60GB of residuals while creating more.
+    # =========================================================================
+
+    # Store additional extraction results for advanced features
+    supervised_directions = None
+    concept_cone_result = None
+    compliance_direction = None
+    refusal_circuits = None
+
+    # Phase 2: Supervised Probing (uses good_residuals, bad_residuals)
+    if settings.use_supervised_probing and not settings.ensemble_probe_pca:
+        print("* Extracting refusal directions using supervised probing...")
+        # Reuse cached residuals instead of recomputing
+        supervised_result = model.get_refusal_directions_supervised(
+            good_residuals,
+            bad_residuals,
+            bad_prompts,
+            evaluator,
+            min_probe_accuracy=settings.min_probe_accuracy,
+        )
+        if isinstance(supervised_result, SupervisedExtractionResult):
+            supervised_directions = supervised_result.directions
+            print(
+                f"  * Supervised probe succeeded (mean accuracy: {supervised_result.get_mean_accuracy():.2f})"
+            )
+        else:
+            raise SupervisedProbeError(
+                f"Supervised probing failed (accuracy below {settings.min_probe_accuracy} or class imbalance). "
+                "This can happen if the model doesn't clearly distinguish refusal vs compliance patterns. "
+                "Try lowering min_probe_accuracy, or disable use_supervised_probing to use PCA instead."
+            )
+
+    # Phase 2: Ensemble Probe + PCA (uses good_residuals, bad_residuals)
+    if settings.ensemble_probe_pca:
+        print("* Extracting refusal directions using ensemble (probe + PCA)...")
+        # Reuse cached residuals instead of recomputing
+        supervised_directions = model.get_refusal_directions_ensemble(
+            good_residuals,
+            bad_residuals,
+            bad_prompts,
+            evaluator,
+            probe_weight=settings.ensemble_weight_probe,
+            pca_weight=settings.ensemble_weight_pca,
+            min_probe_accuracy=settings.min_probe_accuracy,
+        )
+        # Note: get_refusal_directions_ensemble raises RuntimeError if supervised probing fails
+        print("  * Ensemble directions extracted")
+
+    # Phase 4: Concept Cones (uses good_residuals, bad_residuals)
+    if settings.use_concept_cones:
+        print("* Extracting concept cones...")
+        # Reuse cached residuals instead of recomputing
+        cc_result = model.get_refusal_directions_concept_cones(
+            good_residuals,
+            bad_residuals,
+            n_cones=settings.n_concept_cones,
+            min_cone_size=settings.min_cone_size,
+            directions_per_cone=settings.directions_per_cone,
+            min_silhouette_score=settings.min_silhouette_score,
+        )
+        if isinstance(cc_result, ConceptConeExtractionResult):
+            concept_cone_result = cc_result
+            print(f"  * Extracted {len(concept_cone_result.cones)} concept cones")
+        else:
+            raise ConceptConeError(
+                f"Concept cone extraction failed (silhouette score below {settings.min_silhouette_score}). "
+                "This indicates poor clustering quality - harmful prompts may not have distinct categories. "
+                "Try increasing min_cone_size or decreasing n_concept_cones, or disable use_concept_cones."
+            )
+
+    # Phase 5: CAA - Extract compliance direction (uses bad_residuals)
+    if settings.use_caa:
+        print("* Extracting compliance direction for CAA...")
+        # Reuse cached bad_residuals instead of recomputing
+        caa_result = model.get_compliance_directions_from_responses(
+            bad_prompts,
+            bad_residuals,
+            evaluator,
+        )
+        if caa_result is not None:
+            compliant_residuals, refusing_residuals = caa_result
+            compliance_direction = model.extract_compliance_direction(
+                compliant_residuals,
+                refusing_residuals,
+            )
+            print("  * Compliance direction extracted")
+        else:
+            raise CAAExtractionError(
+                "CAA extraction failed due to insufficient samples. Need at least 10 refusals "
+                "and 10 compliant responses from bad_prompts. Either your model already complies "
+                "with most harmful prompts (nothing to ablate), or it refuses everything "
+                "(no compliance examples). Disable use_caa or use a different model."
+            )
+
+    # =========================================================================
+    # CRITICAL: Release the cached residuals NOW - all advanced features that
+    # need them are done. This frees ~60GB GPU memory BEFORE helpfulness
+    # orthogonalization runs, which creates its own residuals.
+    # =========================================================================
+    del good_residuals, bad_residuals
+    empty_cache()
+
     # Apply helpfulness orthogonalization if enabled
+    # NOTE: This creates NEW residuals from helpful_prompts/unhelpful_prompts,
+    # but we've already freed the old residuals above so memory is available.
     if (
         settings.orthogonalize_directions
         and datasets.helpful_prompts
@@ -347,124 +473,6 @@ def run():
         )
         refusal_directions = direction_result.refusal_directions
         refusal_directions_multi = direction_result.refusal_directions_multi
-
-    # NOTE: We keep good_residuals and bad_residuals in memory for reuse by
-    # advanced extraction methods (supervised probing, ensemble, concept cones, CAA).
-    # This avoids redundant GPU computation - a 40-60% speedup for extraction phase.
-
-    # Convert layer profile configs to LayerRangeProfile objects
-    layer_profiles: list[LayerRangeProfile] | None = None
-    if settings.enable_layer_profiles and settings.layer_range_profiles:
-        layer_profiles = [
-            LayerRangeProfile(
-                range_start=p.range_start,
-                range_end=p.range_end,
-                weight_multiplier=p.weight_multiplier,
-            )
-            for p in settings.layer_range_profiles
-        ]
-        print()
-        print("Layer-range profiles enabled:")
-        for p in layer_profiles:
-            print(
-                f"  * Layers {p.range_start:.0%}-{p.range_end:.0%}: "
-                f"weight multiplier = {p.weight_multiplier:.2f}"
-            )
-
-    # Store additional extraction results for advanced features
-    supervised_directions = None
-    concept_cone_result = None
-    compliance_direction = None
-    refusal_circuits = None
-
-    # Phase 2: Supervised Probing
-    if settings.use_supervised_probing and not settings.ensemble_probe_pca:
-        print("* Extracting refusal directions using supervised probing...")
-        # Reuse cached residuals instead of recomputing
-        supervised_result = model.get_refusal_directions_supervised(
-            good_residuals,
-            bad_residuals,
-            bad_prompts,
-            evaluator,
-            min_probe_accuracy=settings.min_probe_accuracy,
-        )
-        if isinstance(supervised_result, SupervisedExtractionResult):
-            supervised_directions = supervised_result.directions
-            print(
-                f"  * Supervised probe succeeded (mean accuracy: {supervised_result.get_mean_accuracy():.2f})"
-            )
-        else:
-            raise SupervisedProbeError(
-                f"Supervised probing failed (accuracy below {settings.min_probe_accuracy} or class imbalance). "
-                "This can happen if the model doesn't clearly distinguish refusal vs compliance patterns. "
-                "Try lowering min_probe_accuracy, or disable use_supervised_probing to use PCA instead."
-            )
-
-    # Phase 2: Ensemble Probe + PCA
-    if settings.ensemble_probe_pca:
-        print("* Extracting refusal directions using ensemble (probe + PCA)...")
-        # Reuse cached residuals instead of recomputing
-        supervised_directions = model.get_refusal_directions_ensemble(
-            good_residuals,
-            bad_residuals,
-            bad_prompts,
-            evaluator,
-            probe_weight=settings.ensemble_weight_probe,
-            pca_weight=settings.ensemble_weight_pca,
-            min_probe_accuracy=settings.min_probe_accuracy,
-        )
-        # Note: get_refusal_directions_ensemble raises RuntimeError if supervised probing fails
-        print("  * Ensemble directions extracted")
-
-    # Phase 4: Concept Cones
-    if settings.use_concept_cones:
-        print("* Extracting concept cones...")
-        # Reuse cached residuals instead of recomputing
-        cc_result = model.get_refusal_directions_concept_cones(
-            good_residuals,
-            bad_residuals,
-            n_cones=settings.n_concept_cones,
-            min_cone_size=settings.min_cone_size,
-            directions_per_cone=settings.directions_per_cone,
-            min_silhouette_score=settings.min_silhouette_score,
-        )
-        if isinstance(cc_result, ConceptConeExtractionResult):
-            concept_cone_result = cc_result
-            print(f"  * Extracted {len(concept_cone_result.cones)} concept cones")
-        else:
-            raise ConceptConeError(
-                f"Concept cone extraction failed (silhouette score below {settings.min_silhouette_score}). "
-                "This indicates poor clustering quality - harmful prompts may not have distinct categories. "
-                "Try increasing min_cone_size or decreasing n_concept_cones, or disable use_concept_cones."
-            )
-
-    # Phase 5: CAA - Extract compliance direction
-    if settings.use_caa:
-        print("* Extracting compliance direction for CAA...")
-        # Reuse cached bad_residuals instead of recomputing
-        caa_result = model.get_compliance_directions_from_responses(
-            bad_prompts,
-            bad_residuals,
-            evaluator,
-        )
-        if caa_result is not None:
-            compliant_residuals, refusing_residuals = caa_result
-            compliance_direction = model.extract_compliance_direction(
-                compliant_residuals,
-                refusing_residuals,
-            )
-            print("  * Compliance direction extracted")
-        else:
-            raise CAAExtractionError(
-                "CAA extraction failed due to insufficient samples. Need at least 10 refusals "
-                "and 10 compliant responses from bad_prompts. Either your model already complies "
-                "with most harmful prompts (nothing to ablate), or it refuses everything "
-                "(no compliance examples). Disable use_caa or use a different model."
-            )
-
-    # Now we can release the cached residuals - all extraction methods are done
-    del good_residuals, bad_residuals
-    empty_cache()
 
     # Phase 6: Circuit Discovery
     if settings.use_circuit_ablation:
