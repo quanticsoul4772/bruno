@@ -682,6 +682,27 @@ bruno --ensemble-probe-pca false
 bruno --use-concept-cones false
 ```
 
+### Warm-Start Failing
+**Problem:** No warm-start profile found for the model family.
+
+**Cause:** The model doesn't match any known family (llama, qwen, mistral, gemma, phi). Common with newer or less common models like Moonlight.
+
+**Behavior (v2.0.0+):** Bruno handles this gracefully with explicit user notification:
+1. Prints a warning explaining no profile was found
+2. Continues with random initialization instead of crashing
+3. User is explicitly notified - **NOT a silent fallback**
+
+**Example output:**
+```
+[yellow]  * Warm-start failed: No profile found for model family 'unknown' (model: moonshotai/Moonlight-16B-A3B-Instruct)[/yellow]
+[yellow]  * Continuing with random initialization (set --model-family to use warm-start)[/yellow]
+```
+
+**Manual override:** To specify a model family explicitly:
+```bash
+bruno --model-family qwen  # Use qwen profile for similar architectures
+```
+
 ### pip install --force-reinstall Breaks Environment
 **Problem:** After running `pip install --force-reinstall`, bruno fails with "Could not import module 'Qwen2ForCausalLM'".
 

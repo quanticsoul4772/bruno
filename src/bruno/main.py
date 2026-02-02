@@ -823,9 +823,9 @@ def run():
         # Warm-start was requested but no profile found - continue with random initialization
         detected = detect_model_family(settings.model)
         print(
-            f"[yellow]  * Warm-start failed: No profile found for model: {settings.model}[/yellow]"
+            f"[yellow]  * Warm-start failed: No profile found for model family '{detected or 'unknown'}' "
+            f"(model: {settings.model})[/yellow]"
         )
-        print(f"[yellow]  * Detected family: {detected or 'unknown'}[/yellow]")
         print(
             "[yellow]  * Continuing with random initialization (set --model-family to use warm-start)[/yellow]"
         )

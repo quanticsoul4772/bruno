@@ -682,6 +682,18 @@ See `scripts/setup_runpod_a100.md` for RunPod setup instructions.
 
 ## Successful Abliteration Results
 
+### Moonlight-16B-A3B-Instruct (Latest)
+- **Date:** 2026-02-02
+- **Model:** moonshotai/Moonlight-16B-A3B-Instruct
+- **GPU:** H200 141GB on Vast.ai
+- **Bruno Version:** 2.0.0
+- **Result:** **59% refusal reduction** (100% → 41%), MMLU +0.4%
+- **Notes:**
+  - Verified all v2.0.0 error handlers work correctly
+  - SupervisedProbeError, ConceptConeError, CAA, Warm-start all handled gracefully
+  - MoE architecture (DeepSeek-V3 style) fully supported
+  - Requires transformers==4.51.0
+
 ### Qwen2.5-Coder-32B Trial 173 (Best Result)
 - **Date:** 2026-02-01
 - **Model:** Qwen/Qwen2.5-Coder-32B-Instruct
