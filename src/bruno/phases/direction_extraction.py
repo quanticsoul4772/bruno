@@ -12,6 +12,7 @@ This module handles extracting refusal directions from model activations:
 
 from dataclasses import dataclass
 
+import torch
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -20,7 +21,7 @@ from ..constants import LOW_MAGNITUDE_WARNING
 from ..error_tracker import record_suppressed_error
 from ..exceptions import SacredDirectionError
 from ..model import Model, SacredDirectionResult
-from ..utils import empty_cache, print
+from ..utils import empty_cache, get_gpu_memory_info, print
 
 
 @dataclass
@@ -148,38 +149,65 @@ def apply_helpfulness_orthogonalization(
         unhelpful_prompts: Prompts representing unhelpful/random text
 
     Returns:
-        Updated DirectionExtractionResult with orthogonalized directions
+        Updated DirectionExtractionResult with orthogonalized directions.
+        If OOM occurs, returns the original result without orthogonalization.
     """
     print("* Extracting helpfulness direction for orthogonalization...")
     print(f"  * Loaded {len(helpful_prompts)} helpful prompts")
     print(f"  * Loaded {len(unhelpful_prompts)} unhelpful prompts")
 
-    helpful_residuals = model.get_residuals_batched(helpful_prompts)
-    empty_cache()  # Clear memory before loading more residuals
-    unhelpful_residuals = model.get_residuals_batched(unhelpful_prompts)
+    # Clear GPU memory before this memory-intensive operation
+    empty_cache()
 
-    helpfulness_direction = model.extract_helpfulness_direction(
-        helpful_residuals,
-        unhelpful_residuals,
-    )
+    try:
+        helpful_residuals = model.get_residuals_batched(helpful_prompts)
+        empty_cache()  # Clear memory before loading more residuals
+        unhelpful_residuals = model.get_residuals_batched(unhelpful_prompts)
 
-    print("  * Orthogonalizing refusal direction against helpfulness...")
-    refusal_directions = model.orthogonalize_direction(
-        result.refusal_directions,
-        helpfulness_direction,
-    )
+        helpfulness_direction = model.extract_helpfulness_direction(
+            helpful_residuals,
+            unhelpful_residuals,
+        )
 
-    del helpful_residuals, unhelpful_residuals
-    empty_cache()  # Clear GPU memory after residual extraction
+        print("  * Orthogonalizing refusal direction against helpfulness...")
+        refusal_directions = model.orthogonalize_direction(
+            result.refusal_directions,
+            helpfulness_direction,
+        )
 
-    return DirectionExtractionResult(
-        refusal_directions=refusal_directions,
-        use_multi_direction=result.use_multi_direction,
-        refusal_directions_multi=result.refusal_directions_multi,
-        direction_weights=result.direction_weights,
-        helpfulness_direction=helpfulness_direction,
-        sacred_directions_result=result.sacred_directions_result,
-    )
+        del helpful_residuals, unhelpful_residuals
+        empty_cache()  # Clear GPU memory after residual extraction
+
+        return DirectionExtractionResult(
+            refusal_directions=refusal_directions,
+            use_multi_direction=result.use_multi_direction,
+            refusal_directions_multi=result.refusal_directions_multi,
+            direction_weights=result.direction_weights,
+            helpfulness_direction=helpfulness_direction,
+            sacred_directions_result=result.sacred_directions_result,
+        )
+
+    except torch.cuda.OutOfMemoryError:
+        mem_info = get_gpu_memory_info()
+        print(
+            "[yellow]  * Helpfulness orthogonalization failed: GPU OOM during residual extraction[/yellow]"
+        )
+        print(
+            f"[yellow]  * GPU Memory: {mem_info['used_gb']:.1f}/{mem_info['total_gb']:.1f} GB used[/yellow]"
+        )
+        print("[yellow]  * Continuing without helpfulness orthogonalization[/yellow]")
+        empty_cache()
+        record_suppressed_error(
+            error=None,
+            context="helpfulness_orthogonalization_oom",
+            module="direction_extraction",
+            severity="warning",
+            details={
+                "helpful_prompts": len(helpful_prompts),
+                "unhelpful_prompts": len(unhelpful_prompts),
+            },
+        )
+        return result
 
 
 def extract_sacred_directions(
