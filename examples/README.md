@@ -36,3 +36,17 @@ uv run python examples/chat_app.py --share
 - Structured logging via Python's `logging` module
 
 See chat_app.py source code for detailed implementation notes.
+
+**Known Issues & Fixes:**
+
+- **Gradio 6 Textbox Freeze:** After generation completes, the input textbox may become disabled. The fix is to explicitly return `gr.update(value="", interactive=True)` from the `user_message()` function and add a `.then()` handler to re-enable the textbox after the response completes. See `fix_chat_app.py` in the project root for the full patch.
+
+### monitor_app.py
+
+Real-time monitoring dashboard for bruno abliteration runs.
+
+**Usage:**
+
+```bash
+uv run python examples/monitor_app.py
+```

@@ -248,6 +248,16 @@ These are critical mistakes from previous abliteration runs. **DO NOT REPEAT THE
 - ✅ "It's downloading" means DO NOT start another download
 - ✅ If unsure, ASK - don't assume and act
 
+### Mistake 24: Gradio 6 Textbox Freeze Bug
+**What happened:** After model generates a response, the chat input textbox becomes disabled and user can't send a second message without refreshing the browser.
+
+**Cause:** Gradio 6 changed how textbox state is managed. The textbox doesn't automatically re-enable after a streaming generator completes.
+
+**Solution:**
+- ✅ Return `gr.update(value="", interactive=True)` from `user_message()` instead of just `""`
+- ✅ Add `.then(lambda: gr.update(value="", interactive=True), outputs=[msg])` after the response chain
+- ✅ See `fix_chat_app.py` in project root for the complete patch
+
 ---
 
 ## Model Specifications
@@ -1057,6 +1067,8 @@ Improvements:
 5. **Wait for instances to load:** 3-5 minutes is normal, don't destroy loading instances
 6. **Check before starting downloads:** Use `ps aux | grep python` to see if download is already running
 7. **Listen to user:** When user says "wait" or "it's downloading" - STOP and LISTEN
+8. **Gradio 6 textbox fix:** The chat app textbox may freeze after generation - fix requires explicit `gr.update(interactive=True)`
+9. **Max tokens default is 512:** Responses may be truncated - use Advanced Settings to increase
 
 ---
 
@@ -1095,3 +1107,19 @@ Improvements:
 **Conclusion:** The abliterated model successfully bypasses refusals that the base Moonlight model would enforce. The abliteration is confirmed working.
 
 **Deprecation Warning:** `seen_tokens` attribute warning from transformers - harmless, can be ignored.
+
+### Gradio Chat App Fix (February 2026)
+
+**Issue:** After sending a message, the textbox wouldn't re-enable, requiring a browser refresh to send a second message.
+
+**Cause:** In Gradio 6, the textbox component gets stuck in a disabled state after the generator completes.
+
+**Fix Applied:**
+1. Modified `user_message()` to return `gr.update(value="", interactive=True)` instead of just `""`
+2. Added `.then(lambda: gr.update(value="", interactive=True), outputs=[msg])` after both event chains
+
+**Files Modified:**
+- `/workspace/chat_app.py` on Vast.ai instance (via sed)
+- See `fix_chat_app.py` in project root for the full patch
+
+**Verification:** After restarting the chat app, multiple messages can be sent without refreshing the browser.
