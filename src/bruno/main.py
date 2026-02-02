@@ -74,7 +74,6 @@ from .exceptions import (
     ConceptConeError,
     ModelInferenceError,
     SupervisedProbeError,
-    WarmStartError,
 )
 from .logging import get_logger
 from .model import (
@@ -821,13 +820,14 @@ def run():
         and not warm_start_enqueued
         and completed_trials == 0
     ):
-        # Warm-start was requested but no profile found
+        # Warm-start was requested but no profile found - continue with random initialization
         detected = detect_model_family(settings.model)
-        raise WarmStartError(
-            f"Warm-start enabled but no profile found for model: {settings.model}. "
-            f"Detected family: {detected or 'unknown'}. "
-            f"Set --model-family to one of: llama, qwen, mistral, gemma, phi. "
-            f"Or disable use_warm_start_params to use random initialization."
+        print(
+            f"[yellow]  * Warm-start failed: No profile found for model: {settings.model}[/yellow]"
+        )
+        print(f"[yellow]  * Detected family: {detected or 'unknown'}[/yellow]")
+        print(
+            "[yellow]  * Continuing with random initialization (set --model-family to use warm-start)[/yellow]"
         )
 
     # Run optimization loop using phase module
