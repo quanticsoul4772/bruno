@@ -198,6 +198,18 @@ These are critical mistakes from previous abliteration runs. **DO NOT REPEAT THE
 - ✅ HF_TOKEN, VAST_API_KEY are stored in .env
 - ✅ Use `cat .env | grep HF` to retrieve token
 
+### Mistake 19: .env File Encoding Issues (UTF-16 vs UTF-8)
+**What happened:** `bruno-vast` CLI failed with `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff` because .env file was saved in UTF-16 LE encoding (by Windows Notepad) instead of UTF-8.
+
+**Prevention:**
+- ✅ Check .env encoding before cloud operations: `file .env`
+- ✅ If encoding shows "UTF-16" or "Little-endian", convert to UTF-8:
+  ```bash
+  iconv -f UTF-16LE -t UTF-8 .env > .env.tmp && mv .env.tmp .env
+  ```
+- ✅ Verify fix worked: `file .env` should show "ASCII text" or "UTF-8"
+- ✅ Use editors that save as UTF-8 by default (VS Code, not Notepad)
+
 ---
 
 ## Model Specifications
