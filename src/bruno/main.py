@@ -71,7 +71,6 @@ from .evaluator import Evaluator
 from .exceptions import (
     AbliterationError,
     BatchSizeError,
-    CAAExtractionError,
     ConceptConeError,
     ModelInferenceError,
     SupervisedProbeError,
@@ -80,10 +79,8 @@ from .exceptions import (
 from .logging import get_logger
 from .model import (
     AbliterationParameters,
-    ConceptConeExtractionResult,
     LayerRangeProfile,
     Model,
-    SupervisedExtractionResult,
 )
 from .phases import (
     apply_helpfulness_orthogonalization,
@@ -352,63 +349,63 @@ def run():
     # Phase 2: Supervised Probing (uses good_residuals, bad_residuals)
     if settings.use_supervised_probing and not settings.ensemble_probe_pca:
         print("* Extracting refusal directions using supervised probing...")
-        # Reuse cached residuals instead of recomputing
-        supervised_result = model.get_refusal_directions_supervised(
-            good_residuals,
-            bad_residuals,
-            bad_prompts,
-            evaluator,
-            min_probe_accuracy=settings.min_probe_accuracy,
-        )
-        if isinstance(supervised_result, SupervisedExtractionResult):
+        try:
+            # Reuse cached residuals instead of recomputing
+            supervised_result = model.get_refusal_directions_supervised(
+                good_residuals,
+                bad_residuals,
+                bad_prompts,
+                evaluator,
+                min_probe_accuracy=settings.min_probe_accuracy,
+            )
             supervised_directions = supervised_result.directions
             print(
                 f"  * Supervised probe succeeded (mean accuracy: {supervised_result.get_mean_accuracy():.2f})"
             )
-        else:
-            raise SupervisedProbeError(
-                f"Supervised probing failed (accuracy below {settings.min_probe_accuracy} or class imbalance). "
-                "This can happen if the model doesn't clearly distinguish refusal vs compliance patterns. "
-                "Try lowering min_probe_accuracy, or disable use_supervised_probing to use PCA instead."
-            )
+        except SupervisedProbeError as e:
+            print(f"[yellow]  * Supervised probing failed: {e}[/yellow]")
+            print("[yellow]  * Continuing with PCA-only extraction[/yellow]")
+            supervised_directions = None
 
     # Phase 2: Ensemble Probe + PCA (uses good_residuals, bad_residuals)
     if settings.ensemble_probe_pca:
         print("* Extracting refusal directions using ensemble (probe + PCA)...")
-        # Reuse cached residuals instead of recomputing
-        supervised_directions = model.get_refusal_directions_ensemble(
-            good_residuals,
-            bad_residuals,
-            bad_prompts,
-            evaluator,
-            probe_weight=settings.ensemble_weight_probe,
-            pca_weight=settings.ensemble_weight_pca,
-            min_probe_accuracy=settings.min_probe_accuracy,
-        )
-        # Note: get_refusal_directions_ensemble raises RuntimeError if supervised probing fails
-        print("  * Ensemble directions extracted")
+        try:
+            # Reuse cached residuals instead of recomputing
+            supervised_directions = model.get_refusal_directions_ensemble(
+                good_residuals,
+                bad_residuals,
+                bad_prompts,
+                evaluator,
+                probe_weight=settings.ensemble_weight_probe,
+                pca_weight=settings.ensemble_weight_pca,
+                min_probe_accuracy=settings.min_probe_accuracy,
+            )
+            print("  * Ensemble directions extracted")
+        except SupervisedProbeError as e:
+            print(f"[yellow]  * Ensemble extraction failed: {e}[/yellow]")
+            print("[yellow]  * Continuing with PCA-only extraction[/yellow]")
+            supervised_directions = None
 
     # Phase 4: Concept Cones (uses good_residuals, bad_residuals)
     if settings.use_concept_cones:
         print("* Extracting concept cones...")
-        # Reuse cached residuals instead of recomputing
-        cc_result = model.get_refusal_directions_concept_cones(
-            good_residuals,
-            bad_residuals,
-            n_cones=settings.n_concept_cones,
-            min_cone_size=settings.min_cone_size,
-            directions_per_cone=settings.directions_per_cone,
-            min_silhouette_score=settings.min_silhouette_score,
-        )
-        if isinstance(cc_result, ConceptConeExtractionResult):
+        try:
+            # Reuse cached residuals instead of recomputing
+            cc_result = model.get_refusal_directions_concept_cones(
+                good_residuals,
+                bad_residuals,
+                n_cones=settings.n_concept_cones,
+                min_cone_size=settings.min_cone_size,
+                directions_per_cone=settings.directions_per_cone,
+                min_silhouette_score=settings.min_silhouette_score,
+            )
             concept_cone_result = cc_result
             print(f"  * Extracted {len(concept_cone_result.cones)} concept cones")
-        else:
-            raise ConceptConeError(
-                f"Concept cone extraction failed (silhouette score below {settings.min_silhouette_score}). "
-                "This indicates poor clustering quality - harmful prompts may not have distinct categories. "
-                "Try increasing min_cone_size or decreasing n_concept_cones, or disable use_concept_cones."
-            )
+        except ConceptConeError as e:
+            print(f"[yellow]  * Concept cone extraction failed: {e}[/yellow]")
+            print("[yellow]  * Continuing with standard PCA extraction[/yellow]")
+            concept_cone_result = None
 
     # Phase 5: CAA - Extract compliance direction (uses bad_residuals)
     if settings.use_caa:
@@ -427,12 +424,11 @@ def run():
             )
             print("  * Compliance direction extracted")
         else:
-            raise CAAExtractionError(
-                "CAA extraction failed due to insufficient samples. Need at least 10 refusals "
-                "and 10 compliant responses from bad_prompts. Either your model already complies "
-                "with most harmful prompts (nothing to ablate), or it refuses everything "
-                "(no compliance examples). Disable use_caa or use a different model."
+            print(
+                "[yellow]  * CAA extraction failed: insufficient samples (need 10+ refusals and 10+ compliant)[/yellow]"
             )
+            print("[yellow]  * Continuing without CAA[/yellow]")
+            compliance_direction = None
 
     # =========================================================================
     # CRITICAL: Release the cached residuals NOW - all advanced features that
