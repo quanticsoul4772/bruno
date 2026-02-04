@@ -1967,39 +1967,13 @@ class Model:
         residuals = []
         failed_batches = 0
 
-        for batch_idx, batch in enumerate(batchify(prompts, self.settings.batch_size)):
-            try:
-                residuals.append(self.get_residuals(batch))
-            except ResidualExtractionError:
-                # Re-raise residual extraction errors directly
-                raise
-            except torch.cuda.OutOfMemoryError as e:
-                failed_batches += 1
-                if failed_batches > 3:
-                    raise ResidualExtractionError(
-                        f"GPU OOM during residual extraction after {failed_batches} failed batches. "
-                        f"Try reducing batch_size (current: {self.settings.batch_size})."
-                    ) from e
-                record_suppressed_error(
-                    error=e,
-                    context="get_residuals_batched_oom",
-                    module="model",
-                    severity="warning",
-                    details={
-                        "batch_idx": batch_idx,
-                        "batch_size": len(batch),
-                        "failed_batches": failed_batches,
-                    },
-                )
-                empty_cache()
-                # Retry this batch after clearing cache
-                try:
-                    residuals.append(self.get_residuals(batch))
-                except torch.cuda.OutOfMemoryError as retry_e:
-                    raise ResidualExtractionError(
-                        f"GPU OOM during residual extraction at batch {batch_idx} even after cache clear. "
-                        f"Batch size: {len(batch)}. Try reducing batch_size."
-                    ) from retry_e
+        # Process batches
+        batches = list(batchify(prompts, self.settings.batch_size))
+
+        for batch_idx, batch in enumerate(batches):
+            self._extract_batch_with_retry(
+                batch, batch_idx, residuals, failed_batches
+            )
 
         if not residuals:
             raise ResidualExtractionError(
@@ -2012,6 +1986,47 @@ class Model:
             raise ResidualExtractionError(
                 f"Failed to concatenate residual batches: {e}"
             ) from e
+
+    def _extract_batch_with_retry(
+        self,
+        batch: list[str],
+        batch_idx: int,
+        residuals: list,
+        failed_batches: int,
+    ) -> None:
+        """Helper to extract residuals for a batch with retry logic."""
+        try:
+            residuals.append(self.get_residuals(batch))
+        except ResidualExtractionError:
+            # Re-raise residual extraction errors directly
+            raise
+        except torch.cuda.OutOfMemoryError as e:
+            failed_batches += 1
+            if failed_batches > 3:
+                raise ResidualExtractionError(
+                    f"GPU OOM during residual extraction after {failed_batches} failed batches. "
+                    f"Try reducing batch_size (current: {self.settings.batch_size})."
+                ) from e
+            record_suppressed_error(
+                error=e,
+                context="get_residuals_batched_oom",
+                module="model",
+                severity="warning",
+                details={
+                    "batch_idx": batch_idx,
+                    "batch_size": len(batch),
+                    "failed_batches": failed_batches,
+                },
+            )
+            empty_cache()
+            # Retry this batch after clearing cache
+            try:
+                residuals.append(self.get_residuals(batch))
+            except torch.cuda.OutOfMemoryError as retry_e:
+                raise ResidualExtractionError(
+                    f"GPU OOM during residual extraction at batch {batch_idx} even after cache clear. "
+                    f"Batch size: {len(batch)}. Try reducing batch_size."
+                ) from retry_e
 
     # We work with logprobs rather than probabilities for numerical stability
     # when computing the KL divergence.
@@ -4970,6 +4985,581 @@ class Model:
                 f"MoE abliteration had too many failures: {stats['errors_suppressed']} errors out of "
                 f"{total_attempted} attempted operations. Check error tracker for details."
             )
+
+        return stats
+
+    # ==================== MoE Gate Abliteration ====================
+
+    def compute_routing_entropy(self, prompts: list[str]) -> dict[int, float]:
+        """Compute entropy of expert routing distribution per layer.
+
+        Higher entropy = more uniform routing (healthy)
+        Lower entropy = routing collapse (unhealthy)
+
+        Args:
+            prompts: List of prompts to analyze routing for
+
+        Returns:
+            Dict mapping layer_idx -> entropy (0.0 to log(n_experts))
+        """
+        activations = self.track_expert_activations(prompts)
+        if activations is None:
+            return {}
+
+        entropies = {}
+        for layer_idx, counts in activations.layer_expert_counts.items():
+            total = sum(counts.values())
+            if total == 0:
+                entropies[layer_idx] = 0.0
+                continue
+
+            probs = [count / total for count in counts.values() if count > 0]
+            entropy = -sum(p * math.log(p) for p in probs)
+            entropies[layer_idx] = entropy
+
+        return entropies
+
+    def check_routing_health(
+        self, prompts: list[str], min_entropy: float = 0.5
+    ) -> bool:
+        """Check if routing is healthy (not collapsed).
+
+        Returns True if mean entropy > min_entropy.
+
+        Args:
+            prompts: List of prompts to check routing health for
+            min_entropy: Minimum normalized entropy threshold (0.0 to 1.0)
+
+        Returns:
+            True if routing is healthy, False if collapsed
+        """
+        entropies = self.compute_routing_entropy(prompts)
+        if not entropies:
+            return True  # Non-MoE model or no entropy data
+
+        # Guard against empty dict after filtering
+        if len(entropies) == 0:
+            logger.warning("No entropy values computed, assuming healthy routing")
+            return True
+
+        mean_entropy = sum(entropies.values()) / len(entropies)
+
+        moe_config = self.get_moe_config()
+        if moe_config is None or moe_config[0] <= 1:
+            logger.warning("Invalid MoE config for entropy normalization")
+            return True
+
+        max_possible = math.log(moe_config[0])
+        if max_possible <= 0:
+            logger.warning(
+                "Max possible entropy is non-positive, assuming healthy routing"
+            )
+            return True
+
+        normalized_entropy = mean_entropy / max_possible
+
+        logger.debug(
+            "Routing health check",
+            mean_entropy=mean_entropy,
+            max_possible=max_possible,
+            normalized_entropy=normalized_entropy,
+            threshold=min_entropy,
+        )
+
+        return normalized_entropy > min_entropy
+
+    def abliterate_gate(
+        self,
+        layer_idx: int,
+        refusal_direction: Tensor,
+        strength: float = 1.0,
+    ) -> bool:
+        """Abliterate the gate's ability to detect refusal-related content.
+
+        The gate projects inputs to expert affinity scores. By removing the
+        refusal direction from the gate weights, we prevent the gate from
+        "seeing" refusal-triggering patterns in the input.
+
+        Args:
+            layer_idx: Which layer's gate to modify
+            refusal_direction: Direction to remove (hidden_dim,)
+            strength: Ablation strength (0.0 to 1.0)
+
+        Returns:
+            True if gate was abliterated, False if layer has no gate
+        """
+        layer = self.get_layers()[layer_idx]
+
+        if not hasattr(layer.mlp, "gate"):
+            logger.debug(f"Layer {layer_idx} has no gate attribute, skipping")
+            return False
+
+        gate = layer.mlp.gate
+        if not hasattr(gate, "weight"):
+            logger.debug(f"Layer {layer_idx} gate has no weight attribute, skipping")
+            return False
+
+        # Gate weight: [n_experts, hidden_dim]
+        gate_weight = gate.weight.data
+
+        # Normalize direction
+        direction = refusal_direction.to(gate_weight.device)
+        direction = direction / (direction.norm() + EPSILON)
+
+        # Create projector
+        projector = torch.outer(direction, direction).to(gate_weight.dtype)
+
+        # Remove refusal direction from gate's input detection
+        # W' = W - strength * (W @ projector)
+        gate.weight.data = gate_weight - strength * (gate_weight @ projector)
+
+        logger.debug(f"Abliterated gate at layer {layer_idx} with strength {strength}")
+        return True
+
+    def abliterate_gates(
+        self,
+        refusal_directions: Tensor,
+        strength: float = 1.0,
+        layer_profiles: list["LayerRangeProfile"] | None = None,
+    ) -> int:
+        """Abliterate gates across all MoE layers.
+
+        Args:
+            refusal_directions: Per-layer directions (n_layers+1, hidden_dim)
+            strength: Base ablation strength
+            layer_profiles: Optional per-layer weight profiles
+
+        Returns:
+            Number of gates abliterated
+        """
+        num_layers = len(self.get_layers())
+        gates_ablated = 0
+
+        logger.info(
+            "Abliterating MoE gates",
+            num_layers=num_layers,
+            strength=strength,
+        )
+
+        for layer_idx in range(num_layers):
+            # Get layer-specific direction (+1 for embedding offset)
+            direction = refusal_directions[layer_idx + 1]
+
+            # Skip if direction contains NaN/Inf
+            if torch.isnan(direction).any() or torch.isinf(direction).any():
+                logger.warning(f"Skipping gate at layer {layer_idx}: direction contains NaN/Inf")
+                continue
+
+            # Apply layer profile multiplier
+            layer_multiplier = self.get_layer_multiplier(
+                layer_idx, num_layers, layer_profiles
+            )
+            effective_strength = strength * layer_multiplier
+
+            if self.abliterate_gate(layer_idx, direction, effective_strength):
+                gates_ablated += 1
+
+        logger.info(f"Abliterated {gates_ablated} MoE gates")
+        return gates_ablated
+
+    def _track_expert_activations_per_prompt(
+        self,
+        prompts: list[str],
+    ) -> dict[int, dict[int, set[int]]] | None:
+        """Track which experts activate for each individual prompt.
+
+        NOTE: The hook implementation handles several common MoE output formats,
+        but may need architecture-specific customization. The exact output format
+        of DeepSeek/Moonlight gates should be verified against the actual model
+        before production use.
+
+        Args:
+            prompts: List of prompts to track activations for
+
+        Returns:
+            layer_idx -> prompt_idx -> set of expert indices that activated
+            Returns None if model is not MoE or tracking fails.
+        """
+        if not self.is_moe_model():
+            logger.debug("Not an MoE model, skipping per-prompt activation tracking")
+            return None
+
+        per_prompt_activations: dict[int, dict[int, set[int]]] = {}
+
+        # Register hooks to capture expert selections per prompt
+        hooks = []
+        captured_experts: dict[int, set[int]] = {}  # layer_idx -> expert indices
+        missing_router_indices_warned = False  # Track if we've warned about unrecognized output format
+
+        def make_hook(layer_idx: int):
+            def hook(module, input, output):
+                nonlocal missing_router_indices_warned
+                # Capture which experts were selected
+                # Implementation depends on specific MoE architecture
+                try:
+                    if hasattr(output, "router_indices"):
+                        indices = output.router_indices.flatten().tolist()
+                        captured_experts.setdefault(layer_idx, set()).update(indices)
+                    elif hasattr(output, "topk_indices"):
+                        # Alternative attribute name used by some MoE implementations
+                        indices = output.topk_indices.flatten().tolist()
+                        captured_experts.setdefault(layer_idx, set()).update(indices)
+                    elif isinstance(output, tuple) and len(output) >= 2:
+                        # Some gates return (scores, indices) tuple
+                        potential_indices = output[0]  # DeepSeek: (topk_idx, topk_weight, ...)
+                        if hasattr(potential_indices, "flatten") and torch.is_tensor(
+                            potential_indices
+                        ):
+                            indices = potential_indices.flatten().tolist()
+                            captured_experts.setdefault(layer_idx, set()).update(indices)
+                    else:
+                        # Gate output format not recognized
+                        if not missing_router_indices_warned:
+                            logger.warning(
+                                f"Gate output at layer {layer_idx} has no recognized routing indices. "
+                                f"Output type: {type(output)}. Per-prompt tracking may be incomplete."
+                            )
+                            missing_router_indices_warned = True
+                except Exception as e:
+                    record_suppressed_error(
+                        error=e,
+                        context="_track_expert_activations_per_prompt_hook",
+                        module="model",
+                        severity="warning",
+                        details={"layer_idx": layer_idx},
+                    )
+
+            return hook
+
+        try:
+            # Register hooks on each MoE layer's gate
+            for layer_idx, layer in enumerate(self.get_layers()):
+                if hasattr(layer.mlp, "gate"):
+                    hook = layer.mlp.gate.register_forward_hook(make_hook(layer_idx))
+                    hooks.append(hook)
+
+            if not hooks:
+                logger.debug("No MoE gates found for per-prompt tracking")
+                return None
+
+            # Process each prompt individually
+            for prompt_idx, prompt in enumerate(prompts):
+                captured_experts.clear()
+
+                # Forward pass to capture expert activations
+                try:
+                    with torch.no_grad():
+                        self.generate([prompt], max_new_tokens=1)
+                except Exception as e:
+                    record_suppressed_error(
+                        error=e,
+                        context="_track_expert_activations_per_prompt_forward",
+                        module="model",
+                        severity="warning",
+                        details={"prompt_idx": prompt_idx},
+                    )
+                    continue
+
+                # Store per-prompt results
+                for layer_idx, experts in captured_experts.items():
+                    if layer_idx not in per_prompt_activations:
+                        per_prompt_activations[layer_idx] = {}
+                    per_prompt_activations[layer_idx][prompt_idx] = experts.copy()
+
+            logger.debug(
+                f"Tracked per-prompt activations for {len(prompts)} prompts "
+                f"across {len(per_prompt_activations)} layers"
+            )
+            return per_prompt_activations
+
+        except Exception as e:
+            logger.warning(f"Failed to track per-prompt expert activations: {e}")
+            record_suppressed_error(
+                error=e,
+                context="_track_expert_activations_per_prompt",
+                module="model",
+                severity="error",
+                details={"n_prompts": len(prompts)},
+                include_traceback=True,
+            )
+            return None
+        finally:
+            # Clean up hooks
+            for hook in hooks:
+                try:
+                    hook.remove()
+                except Exception:
+                    pass
+
+    def compute_expert_compliance_scores(
+        self,
+        bad_prompts: list[str],
+        evaluator: "Evaluator",
+    ) -> dict[int, dict[int, float]]:
+        """Compute compliance scores for each expert based on per-prompt activation correlation.
+
+        For each expert, correlate its activation frequency with refusal outcomes
+        across individual prompts. Experts that activate more on prompts that
+        result in refusals get negative scores.
+
+        Args:
+            bad_prompts: List of harmful prompts
+            evaluator: Evaluator instance for refusal detection
+
+        Returns:
+            layer_idx -> expert_idx -> score (-1 to 1)
+            Returns empty dict if tracking fails or no data available.
+        """
+        logger.info("Computing expert compliance scores")
+
+        # Track per-prompt expert activations
+        per_prompt_activations = self._track_expert_activations_per_prompt(bad_prompts)
+        if per_prompt_activations is None:
+            logger.warning(
+                "Could not track per-prompt activations, returning empty scores"
+            )
+            return {}
+
+        if not per_prompt_activations:
+            logger.warning("No activation data captured, returning empty scores")
+            return {}
+
+        # Generate responses and check for refusals
+        logger.debug(f"Generating responses for {len(bad_prompts)} prompts")
+        responses = self.get_responses_batched(bad_prompts)
+        refusal_mask = [evaluator.is_refusal(r) for r in responses]
+
+        n_refusals = sum(refusal_mask)
+        logger.debug(
+            f"Refusal detection: {n_refusals}/{len(bad_prompts)} prompts refused"
+        )
+
+        scores: dict[int, dict[int, float]] = {}
+        for layer_idx in per_prompt_activations.keys():
+            layer_scores: dict[int, float] = {}
+
+            # per_prompt_activations[layer_idx] is dict: prompt_idx -> set of expert_idx
+            prompt_experts = per_prompt_activations[layer_idx]
+
+            # For each expert, compute correlation with refusal outcomes
+            all_experts: set[int] = set()
+            for experts in prompt_experts.values():
+                all_experts.update(experts)
+
+            for exp_idx in all_experts:
+                # Count: how often does this expert activate on refusing vs compliant prompts?
+                refusal_activations = 0
+                comply_activations = 0
+
+                for prompt_idx, experts in prompt_experts.items():
+                    if exp_idx in experts:
+                        if prompt_idx < len(refusal_mask) and refusal_mask[prompt_idx]:
+                            refusal_activations += 1
+                        else:
+                            comply_activations += 1
+
+                total = refusal_activations + comply_activations
+                if total > 0:
+                    # Score: -1 if only activates on refusals, +1 if only on compliance
+                    compliance_score = (comply_activations - refusal_activations) / total
+                else:
+                    compliance_score = 0.0
+
+                layer_scores[exp_idx] = compliance_score
+
+            scores[layer_idx] = layer_scores
+
+        # Log summary statistics
+        total_experts = sum(len(s) for s in scores.values())
+        if total_experts > 0:
+            avg_score = (
+                sum(s for layer in scores.values() for s in layer.values())
+                / total_experts
+            )
+            logger.info(
+                f"Computed compliance scores for {total_experts} experts "
+                f"across {len(scores)} layers (avg score: {avg_score:.3f})"
+            )
+        else:
+            logger.warning("No expert compliance scores computed")
+
+        return scores
+
+    def modify_expert_biases(
+        self,
+        expert_scores: dict[int, dict[int, float]],
+        bias_delta: float = 0.3,
+    ) -> int:
+        """Modify gate bias terms to prefer compliant experts.
+
+        Args:
+            expert_scores: layer_idx -> expert_idx -> compliance score (-1 to 1)
+                Negative = refusing, Positive = compliant
+            bias_delta: Maximum bias adjustment
+
+        Returns:
+            Number of biases modified
+        """
+        biases_modified = 0
+        layers_without_bias = 0
+
+        for layer_idx, scores in expert_scores.items():
+            layer = self.get_layers()[layer_idx]
+
+            if not hasattr(layer.mlp, "gate"):
+                continue
+
+            gate = layer.mlp.gate
+            if not hasattr(gate, "e_score_correction"):
+                layers_without_bias += 1
+                continue
+
+            bias = gate.e_score_correction.data
+
+            for exp_idx, score in scores.items():
+                if exp_idx < len(bias):
+                    # score > 0 means compliant, increase bias
+                    # score < 0 means refusing, decrease bias
+                    adjustment = score * bias_delta
+                    bias[exp_idx] += adjustment
+                    biases_modified += 1
+
+        if layers_without_bias > 0:
+            logger.warning(
+                f"Bias manipulation skipped for {layers_without_bias} layers "
+                f"(no e_score_correction attribute)"
+            )
+
+        logger.info(f"Modified {biases_modified} expert biases")
+        return biases_modified
+
+    def abliterate_moe_two_stage(
+        self,
+        refusal_directions: Tensor,
+        bad_prompts: list[str],
+        parameters: dict[str, AbliterationParameters],
+        evaluator: "Evaluator",
+        gate_strength: float = 0.3,
+        expert_threshold: float = 0.1,
+        layer_profiles: list["LayerRangeProfile"] | None = None,
+        use_mpoa: bool = False,
+        mpoa_norm_mode: str = "row",
+        mpoa_min_scale: float = 0.5,
+        mpoa_max_scale: float = 2.0,
+        use_bias_manipulation: bool = True,
+        bias_delta: float = 0.3,
+    ) -> dict[str, int]:
+        """Two-stage MoE abliteration: gate first, then re-track and abliterate experts.
+
+        Stage 1: Abliterate gates to disrupt refusal detection
+        Stage 2: Re-track expert activations (routing patterns changed!)
+        Stage 3: Abliterate remaining high-activation experts
+        Stage 4: (Optional) Modify biases to prefer compliant experts
+
+        This addresses the whack-a-mole problem where abliterating one expert
+        causes routing to shift to another refusing expert.
+
+        Args:
+            refusal_directions: Per-layer refusal directions
+            bad_prompts: Prompts that trigger refusals
+            parameters: Abliteration parameters per component
+            evaluator: Evaluator instance for refusal detection (used in bias manipulation)
+            gate_strength: Strength for gate abliteration
+            expert_threshold: Activation threshold for expert targeting
+            layer_profiles: Optional per-layer weight profiles
+            use_mpoa: Use MPOA norm preservation
+            mpoa_norm_mode: MPOA norm mode
+            mpoa_min_scale: MPOA minimum scale
+            mpoa_max_scale: MPOA maximum scale
+            use_bias_manipulation: Whether to apply bias manipulation
+            bias_delta: Bias manipulation strength
+
+        Returns:
+            Statistics dict with counts of abliterated components
+        """
+        stats: dict[str, int] = {
+            "gates_ablated": 0,
+            "experts_ablated": 0,
+            "shared_experts_ablated": 0,
+            "attn_ablated": 0,
+            "biases_modified": 0,
+            "routing_collapsed": 0,
+        }
+
+        # Stage 1: Gate abliteration
+        logger.info("Two-stage MoE abliteration: Stage 1 - Abliterating gates")
+        stats["gates_ablated"] = self.abliterate_gates(
+            refusal_directions,
+            strength=gate_strength,
+            layer_profiles=layer_profiles,
+        )
+        logger.debug(f"Gates ablated: {stats['gates_ablated']}")
+
+        # Check routing health after gate ablation
+        if not self.check_routing_health(bad_prompts[:20]):
+            logger.warning("Routing collapsed after gate ablation")
+            stats["routing_collapsed"] = 1
+            return stats
+
+        # Stage 2: Re-track activations with modified routing
+        logger.info(
+            "Two-stage MoE abliteration: Stage 2 - Re-tracking expert activations"
+        )
+        new_activations = self.track_expert_activations(bad_prompts)
+
+        if new_activations is None:
+            logger.warning("Could not re-track activations after gate ablation")
+            return stats
+
+        # Get newly targeted experts
+        targeted_experts = self.get_moe_targeted_experts(
+            new_activations,
+            threshold=expert_threshold,
+            top_k=self.settings.moe_top_k_experts,
+        )
+        logger.debug(
+            "Targeted experts after re-tracking",
+            n_layers_with_targets=len(targeted_experts),
+            total_experts_targeted=sum(len(e) for e in targeted_experts.values()),
+        )
+
+        # Stage 3: Targeted expert abliteration
+        logger.info("Two-stage MoE abliteration: Stage 3 - Abliterating targeted experts")
+        expert_stats = self.abliterate_moe_targeted(
+            refusal_directions,
+            parameters,
+            targeted_experts,
+            layer_profiles=layer_profiles,
+            use_mpoa=use_mpoa,
+            mpoa_norm_mode=mpoa_norm_mode,
+            mpoa_min_scale=mpoa_min_scale,
+            mpoa_max_scale=mpoa_max_scale,
+        )
+
+        stats["experts_ablated"] = expert_stats.get("experts_ablated", 0)
+        stats["shared_experts_ablated"] = expert_stats.get("shared_experts_ablated", 0)
+        stats["attn_ablated"] = expert_stats.get("attn_ablated", 0)
+
+        # Stage 4: (Optional) Bias manipulation
+        if use_bias_manipulation:
+            logger.info(
+                "Two-stage MoE abliteration: Stage 4 - Computing compliance scores and modifying biases"
+            )
+            compliance_scores = self.compute_expert_compliance_scores(
+                bad_prompts, evaluator
+            )
+            if compliance_scores:
+                stats["biases_modified"] = self.modify_expert_biases(
+                    compliance_scores, bias_delta
+                )
+
+        logger.info(
+            "Two-stage MoE abliteration complete",
+            gates_ablated=stats["gates_ablated"],
+            experts_ablated=stats["experts_ablated"],
+            shared_experts_ablated=stats["shared_experts_ablated"],
+            biases_modified=stats["biases_modified"],
+        )
 
         return stats
 
