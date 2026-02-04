@@ -42,7 +42,10 @@ if "HF_TOKEN" not in os.environ:
 import click
 
 
-@click.group(invoke_without_command=True)
+@click.group(
+    invoke_without_command=True,
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
 @click.pass_context
 def cli(ctx):
     """Bruno - Neural behavior engineering framework.
@@ -68,8 +71,11 @@ def cli(ctx):
         ctx.invoke(abliterate)
 
 
-@cli.command()
-def abliterate():
+@cli.command(
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True}
+)
+@click.pass_context
+def abliterate(ctx):
     """Run abliteration on a model (default command).
 
     This is the main Bruno functionality - modifying model behaviors
@@ -87,8 +93,12 @@ def abliterate():
     run_abliteration()
 
 
-@cli.command("show-config")
-def show_config():
+@cli.command(
+    "show-config",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
+def show_config(ctx):
     """Display effective configuration and exit.
 
     Shows all configuration values that would be used for a run,
