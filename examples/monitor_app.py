@@ -23,7 +23,7 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 try:
@@ -64,6 +64,36 @@ TARGET_TRIALS: int = 200  # Default target for progress bar
 TOTAL_PROMPTS: int = 104  # Total prompts for refusal counting
 MODEL_NAME: str = ""  # Model being abliterated
 GPU_INFO: str = ""  # GPU info (e.g., "H200 141GB")
+
+# Estimated baseline refusal rate (typical models refuse ~92% of bad prompts initially)
+# Used as fallback when user_attrs["refusals"] is not available
+ESTIMATED_BASELINE_RATE: float = 0.92
+
+
+def get_trial_refusal_count(
+    trial: "optuna.trial.FrozenTrial", total_prompts: int = TOTAL_PROMPTS
+) -> int:
+    """Get refusal count from trial, preferring user_attrs over ratio estimation.
+
+    Bruno stores raw refusal counts in trial.user_attrs["refusals"], but older
+    trials may only have trial.values[1] which is refusal_ratio (refusals/base_refusals).
+
+    Args:
+        trial: Optuna trial object (FrozenTrial from completed trials)
+        total_prompts: Total number of prompts for percentage calculation
+
+    Returns:
+        Estimated refusal count (integer)
+    """
+    if "refusals" in trial.user_attrs:
+        return int(trial.user_attrs["refusals"])
+    # Fallback: values[1] is ratio relative to baseline
+    if trial.values and len(trial.values) > 1:
+        ratio = trial.values[1]
+        estimated_baseline = int(total_prompts * ESTIMATED_BASELINE_RATE)
+        return min(int(ratio * estimated_baseline), total_prompts)
+    return total_prompts
+
 
 # Custom CSS for professional styling
 CUSTOM_CSS = """
@@ -573,22 +603,15 @@ class StudyMonitor:
                     best_trials = study.best_trials
                     if best_trials:
                         # Pick one with lowest refusals
-                        best_trial = min(
-                            best_trials,
-                            key=lambda t: t.values[1] if t.values else float("inf"),
-                        )
+                        best_trial = min(best_trials, key=get_trial_refusal_count)
                         best_kl = f"{best_trial.values[0]:.3f}"
-                        
-                        # Handle refusals - could be stored as rate (0-1) or count
-                        refusals_value = best_trial.values[1]
-                        if refusals_value <= 1.0:  # Stored as rate (0-1)
-                            best_refusals_pct = f"{refusals_value * 100:.1f}%"
-                            best_refusals_raw = int(refusals_value * TOTAL_PROMPTS)
-                            best_refusals = f"{best_refusals_raw}/{TOTAL_PROMPTS}"
-                        else:  # Stored as count
-                            best_refusals_raw = int(refusals_value)
-                            best_refusals = f"{best_refusals_raw}/{TOTAL_PROMPTS}"
-                            best_refusals_pct = f"{(best_refusals_raw / TOTAL_PROMPTS) * 100:.1f}%"
+
+                        # Get refusals from user_attrs (raw count) or estimate from ratio
+                        best_refusals_raw = get_trial_refusal_count(best_trial)
+                        best_refusals = f"{best_refusals_raw}/{TOTAL_PROMPTS}"
+                        best_refusals_pct = (
+                            f"{(best_refusals_raw / TOTAL_PROMPTS) * 100:.1f}%"
+                        )
                         best_params = best_trial.params
                 else:
                     best_trial = study.best_trial
@@ -605,24 +628,26 @@ class StudyMonitor:
         elapsed = "N/A"
         eta = "N/A"
         avg_trial_time = "N/A"
-        
+
         if len(completed) >= 2:
             try:
                 # Get timestamps from completed trials
                 start_times = [t.datetime_start for t in completed if t.datetime_start]
-                complete_times = [t.datetime_complete for t in completed if t.datetime_complete]
-                
+                complete_times = [
+                    t.datetime_complete for t in completed if t.datetime_complete
+                ]
+
                 if start_times and complete_times:
                     first_start = min(start_times)
                     last_complete = max(complete_times)
                     elapsed_td = last_complete - first_start
                     elapsed_secs = elapsed_td.total_seconds()
                     elapsed = format_duration(elapsed_secs)
-                    
+
                     # Average time per trial
                     avg_secs = elapsed_secs / len(completed)
                     avg_trial_time = f"{avg_secs:.1f}s"
-                    
+
                     # ETA for remaining trials
                     remaining_trials = TARGET_TRIALS - len(completed)
                     if remaining_trials > 0:
@@ -634,35 +659,35 @@ class StudyMonitor:
                 pass
 
         # Calculate convergence indicator
-        # Logic: 
+        # Logic:
         # - "Improving" = refusals dropping significantly over trials
         # - "Exploring" = refusals still high (>50%), optimization searching
         # - "Plateauing" = refusals low but not improving much
         # - "Converged" = refusals low (<20%) AND stable
         convergence = "starting"
         convergence_class = ""
-        
+
         if len(completed) >= 20:
             try:
                 sorted_trials = sorted(completed, key=lambda t: t.number)
                 early_trials = sorted_trials[:10]
                 recent_trials = sorted_trials[-10:]
-                
+
                 if is_multi_objective:
                     # Get best refusals from each group
-                    early_best = min(t.values[1] for t in early_trials if t.values and len(t.values) > 1)
-                    recent_best = min(t.values[1] for t in recent_trials if t.values and len(t.values) > 1)
-                    
-                    # Normalize to percentage (0-100)
-                    if early_best <= 1.0:  # Rate format (0-1)
-                        early_pct = early_best * 100
-                        recent_pct = recent_best * 100
-                    else:  # Count format
-                        early_pct = (early_best / TOTAL_PROMPTS) * 100
-                        recent_pct = (recent_best / TOTAL_PROMPTS) * 100
-                    
+                    early_best_count = min(
+                        get_trial_refusal_count(t) for t in early_trials
+                    )
+                    recent_best_count = min(
+                        get_trial_refusal_count(t) for t in recent_trials
+                    )
+
+                    # Convert to percentage of total prompts
+                    early_pct = (early_best_count / TOTAL_PROMPTS) * 100
+                    recent_pct = (recent_best_count / TOTAL_PROMPTS) * 100
+
                     improvement = early_pct - recent_pct  # Positive = getting better
-                    
+
                     # Decision logic based on ABSOLUTE refusal rate + improvement
                     if recent_pct > 50:  # Still refusing most prompts
                         if improvement > 5:
@@ -670,7 +695,9 @@ class StudyMonitor:
                             convergence_class = "convergence-improving"
                         else:
                             convergence = "Exploring"  # Still searching for good params
-                            convergence_class = "convergence-plateauing"  # Yellow - not good yet
+                            convergence_class = (
+                                "convergence-plateauing"  # Yellow - not good yet
+                            )
                     elif recent_pct > 20:  # Moderate refusals
                         if improvement > 3:
                             convergence = "Improving"
@@ -939,112 +966,109 @@ def get_timeline(study: Optional[optuna.Study] = None) -> go.Figure:
     try:
         # Sort trials by number
         sorted_trials = sorted(completed, key=lambda t: t.number)
-        
+
         trial_numbers = []
         kl_values = []
         refusal_values = []
-        
+
         for t in sorted_trials:
             if t.values and len(t.values) >= 2:
                 trial_numbers.append(t.number)
                 kl_values.append(t.values[0])
-                # Normalize refusals to percentage
-                ref_val = t.values[1]
-                if ref_val <= 1.0:  # Rate format (0-1)
-                    refusal_values.append(ref_val * 100)
-                else:  # Count format
-                    refusal_values.append((ref_val / TOTAL_PROMPTS) * 100)
-        
+                # Get refusal count using shared helper
+                refusal_count = get_trial_refusal_count(t)
+                refusal_pct = (refusal_count / TOTAL_PROMPTS) * 100
+                refusal_values.append(refusal_pct)
+
         if len(trial_numbers) < 2:
             return create_empty_figure("Not enough valid trials")
-        
+
         # Calculate running best (minimum so far)
         running_best_kl = []
         running_best_refusals = []
-        best_kl_so_far = float('inf')
-        best_ref_so_far = float('inf')
-        
+        best_kl_so_far = float("inf")
+        best_ref_so_far = float("inf")
+
         for kl, ref in zip(kl_values, refusal_values):
             best_kl_so_far = min(best_kl_so_far, kl)
             best_ref_so_far = min(best_ref_so_far, ref)
             running_best_kl.append(best_kl_so_far)
             running_best_refusals.append(best_ref_so_far)
-        
+
         # Create figure with secondary y-axis
         from plotly.subplots import make_subplots
+
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        
+
         # Individual KL values (scatter, left y-axis)
         fig.add_trace(
             go.Scatter(
                 x=trial_numbers,
                 y=kl_values,
-                mode='markers',
-                name='KL Divergence',
-                marker=dict(color='#7c3aed', size=6, opacity=0.4),
-                hovertemplate='Trial %{x}<br>KL: %{y:.3f}<extra></extra>',
+                mode="markers",
+                name="KL Divergence",
+                marker=dict(color="#7c3aed", size=6, opacity=0.4),
+                hovertemplate="Trial %{x}<br>KL: %{y:.3f}<extra></extra>",
             ),
             secondary_y=False,
         )
-        
+
         # Running best KL line (left y-axis)
         fig.add_trace(
             go.Scatter(
                 x=trial_numbers,
                 y=running_best_kl,
-                mode='lines',
-                name='Best KL',
-                line=dict(color='#7c3aed', width=3),
-                hovertemplate='Trial %{x}<br>Best KL: %{y:.3f}<extra></extra>',
+                mode="lines",
+                name="Best KL",
+                line=dict(color="#7c3aed", width=3),
+                hovertemplate="Trial %{x}<br>Best KL: %{y:.3f}<extra></extra>",
             ),
             secondary_y=False,
         )
-        
+
         # Individual refusal values (scatter, right y-axis)
         fig.add_trace(
             go.Scatter(
                 x=trial_numbers,
                 y=refusal_values,
-                mode='markers',
-                name='Refusal %',
-                marker=dict(color='#dc2626', size=6, opacity=0.4),
-                hovertemplate='Trial %{x}<br>Refusals: %{y:.1f}%<extra></extra>',
+                mode="markers",
+                name="Refusal %",
+                marker=dict(color="#dc2626", size=6, opacity=0.4),
+                hovertemplate="Trial %{x}<br>Refusals: %{y:.1f}%<extra></extra>",
             ),
             secondary_y=True,
         )
-        
+
         # Running best refusals line (right y-axis)
         fig.add_trace(
             go.Scatter(
                 x=trial_numbers,
                 y=running_best_refusals,
-                mode='lines',
-                name='Best Refusal %',
-                line=dict(color='#dc2626', width=3),
-                hovertemplate='Trial %{x}<br>Best Refusals: %{y:.1f}%<extra></extra>',
+                mode="lines",
+                name="Best Refusal %",
+                line=dict(color="#dc2626", width=3),
+                hovertemplate="Trial %{x}<br>Best Refusals: %{y:.1f}%<extra></extra>",
             ),
             secondary_y=True,
         )
-        
+
         # Update layout
         fig.update_layout(
             title="Performance Over Time",
             template="plotly_white",
             legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
             ),
-            hovermode='x unified',
+            hovermode="x unified",
         )
-        
+
         # Update axes
         fig.update_xaxes(title_text="Trial Number")
-        fig.update_yaxes(title_text="KL Divergence", secondary_y=False, color='#7c3aed')
-        fig.update_yaxes(title_text="Refusal Rate (%)", secondary_y=True, color='#dc2626')
-        
+        fig.update_yaxes(title_text="KL Divergence", secondary_y=False, color="#7c3aed")
+        fig.update_yaxes(
+            title_text="Refusal Rate (%)", secondary_y=True, color="#dc2626"
+        )
+
         return fig
     except Exception as e:
         logger.error(f"Error generating performance timeline: {e}")
@@ -1055,16 +1079,16 @@ def get_header_html() -> str:
     """Generate the dashboard header with study name, model, and GPU info."""
     model_badge = ""
     gpu_badge = ""
-    
+
     if MODEL_NAME:
         model_badge = f'<span class="model-badge">{MODEL_NAME}</span>'
     if GPU_INFO:
         gpu_badge = f'<span class="model-badge">{GPU_INFO}</span>'
-    
+
     model_info = ""
     if model_badge or gpu_badge:
         model_info = f'<div class="model-info">{model_badge}{gpu_badge}</div>'
-    
+
     return f"""
     <div class="dashboard-header">
         <h1>Bruno Monitor <span class="study-name">{STUDY_NAME}</span></h1>
@@ -1116,11 +1140,13 @@ def get_metrics_html() -> str:
     """Get metric cards HTML - horizontal row."""
     m = get_monitor()
     stats = m.get_summary_stats()
-    
+
     # Convergence badge
     convergence_html = ""
     if stats["convergence"] and stats["convergence"] != "starting":
-        convergence_html = f'<span class="{stats["convergence_class"]}">{stats["convergence"]}</span>'
+        convergence_html = (
+            f'<span class="{stats["convergence_class"]}">{stats["convergence"]}</span>'
+        )
 
     return f"""
     <div class="metrics-row">
@@ -1250,14 +1276,9 @@ def get_trials_table(study: Optional[optuna.Study] = None) -> list[list]:
         if trial.values and is_multi_objective:
             kl = f"{trial.values[0]:.3f}"
             if len(trial.values) > 1:
-                refusals_value = trial.values[1]
-                # Handle refusals - could be stored as rate (0-1) or count
-                if refusals_value <= 1.0:  # Stored as rate (0-1)
-                    refusal_pct = refusals_value * 100
-                    refusal_count = int(refusals_value * TOTAL_PROMPTS)
-                else:  # Stored as count
-                    refusal_count = int(refusals_value)
-                    refusal_pct = (refusal_count / TOTAL_PROMPTS) * 100
+                # Get refusal count using shared helper
+                refusal_count = get_trial_refusal_count(trial)
+                refusal_pct = (refusal_count / TOTAL_PROMPTS) * 100
                 refusals = f"{refusal_count} ({refusal_pct:.0f}%)"
             else:
                 refusals = "N/A"
@@ -1414,9 +1435,7 @@ def create_ui() -> gr.Blocks:
                         placeholder="Study name",
                         show_label=False,
                     )
-                    change_study_btn = gr.Button(
-                        "Load", size="sm", variant="secondary"
-                    )
+                    change_study_btn = gr.Button("Load", size="sm", variant="secondary")
 
             # Main content - Plots (larger)
             with gr.Column(scale=4):
@@ -1512,7 +1531,15 @@ def create_ui() -> gr.Blocks:
 
 def main() -> None:
     """Main entry point."""
-    global STORAGE_URL, STUDY_NAME, REFRESH_INTERVAL, TARGET_TRIALS, TOTAL_PROMPTS, MODEL_NAME, GPU_INFO, monitor
+    global \
+        STORAGE_URL, \
+        STUDY_NAME, \
+        REFRESH_INTERVAL, \
+        TARGET_TRIALS, \
+        TOTAL_PROMPTS, \
+        MODEL_NAME, \
+        GPU_INFO, \
+        monitor
 
     parser = argparse.ArgumentParser(
         description="Bruno Monitor - Real-time abliteration visualization dashboard",

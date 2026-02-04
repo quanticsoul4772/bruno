@@ -1831,25 +1831,43 @@ class Model:
         projection = weight * (projector @ matrix)
         matrix.sub_(projection)
 
-        # Step 3: Rescale to preserve original norms
+        # Step 3: Rescale to preserve original norms within bounds
         if norm_mode == "row":
             new_norms = torch.linalg.norm(matrix, dim=1, keepdim=True)
-            # Avoid division by zero
-            scaling = original_norms / (new_norms + EPSILON)
-            # Clamp scaling to prevent extreme values
-            scaling = torch.clamp(scaling, min=min_scale, max=max_scale)
+            # Compute scaling to restore original norms
+            # We want: min_scale <= (new_norms * scaling) / original_norms <= max_scale
+            # Solving for scaling bounds:
+            # scaling >= min_scale * original_norms / new_norms
+            # scaling <= max_scale * original_norms / new_norms
+            scaling = torch.where(
+                new_norms > EPSILON,
+                original_norms / new_norms,
+                torch.ones_like(original_norms),
+            )
+            # Compute actual bounds that enforce final norm ratio constraints
+            min_allowed = min_scale * original_norms / (new_norms + EPSILON)
+            max_allowed = max_scale * original_norms / (new_norms + EPSILON)
+            scaling = torch.clamp(scaling, min=min_allowed, max=max_allowed)
             matrix.mul_(scaling)
         elif norm_mode == "column":
             new_norms = torch.linalg.norm(matrix, dim=0, keepdim=True)
-            scaling = original_norms / (new_norms + EPSILON)
-            scaling = torch.clamp(scaling, min=min_scale, max=max_scale)
+            scaling = torch.where(
+                new_norms > EPSILON,
+                original_norms / new_norms,
+                torch.ones_like(original_norms),
+            )
+            min_allowed = min_scale * original_norms / (new_norms + EPSILON)
+            max_allowed = max_scale * original_norms / (new_norms + EPSILON)
+            scaling = torch.clamp(scaling, min=min_allowed, max=max_allowed)
             matrix.mul_(scaling)
         else:  # frobenius
             new_norm = torch.linalg.norm(matrix)
             # Check both original and new norms to handle edge cases
             if original_norm > EPSILON and new_norm > EPSILON:
                 scaling = original_norm / new_norm
-                scaling = torch.clamp(scaling, min=min_scale, max=max_scale)
+                scaling = torch.clamp(
+                    torch.tensor(scaling), min=min_scale, max=max_scale
+                ).item()
                 matrix.mul_(scaling)
             # If original_norm is near-zero, matrix was already near-zero - no scaling needed
             # If new_norm is near-zero but original wasn't, something went wrong - skip scaling to avoid instability
