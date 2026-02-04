@@ -50,10 +50,10 @@ def operation_progress(
             yield update
         finally:
             progress.stop()
-            rich_print(f"[green]✓[/] {description} complete")
+            rich_print(f"[green]{description} complete[/]")
     else:
         # Indeterminate spinner
-        rich_print(f"[cyan]⏳ {description}...[/]")
+        rich_print(f"[cyan]{description}...[/]")
 
         def update(advance: int = 1):
             pass  # No-op for spinner
@@ -61,7 +61,7 @@ def operation_progress(
         try:
             yield update
         finally:
-            rich_print(f"[green]✓[/] {description} complete")
+            rich_print(f"[green]{description} complete[/]")
 
 
 @contextmanager

@@ -84,7 +84,7 @@ class AbliterationSummary:
 
         if self.best_kl_divergence > 2.0:
             rich_print(
-                "[yellow]  ⚠ Warning: High KL divergence (>2.0) may indicate capability damage[/]"
+                "[yellow]  Warning: High KL divergence (>2.0) may indicate capability damage[/]"
             )
 
         # Best Parameters
@@ -105,13 +105,13 @@ class AbliterationSummary:
                 meta_str = ""
                 if feature.metadata:
                     meta_str = f" ({', '.join(f'{k}={v}' for k, v in feature.metadata.items())})"
-                rich_print(f"  ✓ {feature.display_name}{meta_str}")
+                rich_print(f"  - {feature.display_name}{meta_str}")
 
         if feature_summary["failed"]:
             rich_print("\n[bold yellow]Failed Features (used fallback):[/]")
             for failed in feature_summary["failed"]:
                 feature = feature_tracker.features[failed["name"]]
-                rich_print(f"  ⚠ {feature.display_name}")
+                rich_print(f"  - {feature.display_name}")
                 rich_print(f"     Reason: {failed['reason']}")
                 rich_print(f"     Fallback: {failed.get('fallback', 'None')}")
 

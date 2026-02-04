@@ -138,19 +138,19 @@ class FeatureTracker:
         # Active features
         active = [f for f in self.features.values() if f.state == FeatureState.ACTIVE]
         if active:
-            rich_print("\n[green]✓ Active Features:[/]")
+            rich_print("\n[green]Active Features:[/]")
             for feature in active:
                 meta_str = ""
                 if feature.metadata:
                     meta_str = f" ({', '.join(f'{k}={v}' for k, v in feature.metadata.items())})"
-                rich_print(f"  • {feature.display_name}{meta_str}")
+                rich_print(f"  - {feature.display_name}{meta_str}")
 
         # Failed features
         failed = [f for f in self.features.values() if f.state == FeatureState.FAILED]
         if failed:
-            rich_print("\n[yellow]⚠ Failed Features (using fallback):[/]")
+            rich_print("\n[yellow]Failed Features (using fallback):[/]")
             for feature in failed:
-                rich_print(f"  • {feature.display_name}")
+                rich_print(f"  - {feature.display_name}")
                 rich_print(f"    Reason: {feature.failure_reason}")
                 rich_print(f"    Impact: {feature.impact}")
                 if feature.fallback:
@@ -161,18 +161,18 @@ class FeatureTracker:
             f for f in self.features.values() if f.state == FeatureState.UNAVAILABLE
         ]
         if unavailable:
-            rich_print("\n[dim]➖ Unavailable Features:[/]")
+            rich_print("\n[dim]Unavailable Features:[/]")
             for feature in unavailable:
-                rich_print(f"  • {feature.display_name}: {feature.failure_reason}")
+                rich_print(f"  - {feature.display_name}: {feature.failure_reason}")
 
         # Disabled features
         disabled = [
             f for f in self.features.values() if f.state == FeatureState.DISABLED
         ]
         if disabled:
-            rich_print("\n[dim]○ Disabled Features:[/]")
+            rich_print("\n[dim]Disabled Features:[/]")
             for feature in disabled:
-                rich_print(f"  • {feature.display_name}")
+                rich_print(f"  - {feature.display_name}")
 
 
 # Global feature tracker instance

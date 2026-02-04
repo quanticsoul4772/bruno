@@ -26,7 +26,7 @@ def format_error_message(
         Formatted error message
     """
     lines = [
-        f"[red]✗ {operation} failed[/]",
+        f"[red]{operation} failed[/]",
         f"[yellow]Reason:[/] {reason}",
         f"[yellow]Impact:[/] {impact}",
         "[yellow]Solutions:[/]",
@@ -38,7 +38,7 @@ def format_error_message(
     if context:
         lines.append("\n[dim]Additional Context:[/]")
         for key, value in context.items():
-            lines.append(f"  • {key}: {value}")
+            lines.append(f"  - {key}: {value}")
 
     return "\n".join(lines)
 
@@ -68,7 +68,7 @@ def format_warning_message(operation: str, issue: str, recommendation: str) -> s
         Formatted warning message
     """
     return (
-        f"[yellow]⚠ {operation} warning[/]\n"
+        f"[yellow]{operation} warning[/]\n"
         f"[yellow]Issue:[/] {issue}\n"
         f"[yellow]Recommendation:[/] {recommendation}"
     )
