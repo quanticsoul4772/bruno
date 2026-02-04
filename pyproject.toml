@@ -8,7 +8,7 @@ authors = [
     { name = "Philipp Emanuel Weidmann", email = "pew@worldwidemann.com" },
     { name = "quanticsoul4772", email = "quanticsoul4772@users.noreply.github.com" }
 ]
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10,<3.13"
 keywords = ["llm", "transformer", "abliteration", "neural", "behavior", "alignment"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -38,7 +38,7 @@ dependencies = [
     "click>=8.1.8",  # Match ddgs requirement
     "fabric>=3.2.0",
     # PyTorch with CUDA support (platform-specific)
-    "torch>=2.6.0",
+    "torch>=2.8.0",
 ]
 
 [dependency-groups]
@@ -73,12 +73,12 @@ data-files = { "bruno" = ["config.default.toml"] }
 
 # PyTorch CUDA index configuration
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu124" }
+torch = { index = "pytorch-cu128" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
