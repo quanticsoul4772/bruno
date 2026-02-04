@@ -1384,6 +1384,647 @@ class TestModelMultiTokenLogprobs:
         assert logprobs.shape == (2, 3, 32000)
 
 
+class TestMoERoutingEntropy:
+    """Test MoE routing entropy computation."""
+
+    def test_compute_routing_entropy_returns_dict(self):
+        """Test compute_routing_entropy returns dict mapping layer to entropy."""
+        from bruno.model import Model, MoEExpertActivations
+
+        mock_model = MagicMock()
+
+        # Mock track_expert_activations to return test data
+        mock_activations = MoEExpertActivations(
+            layer_expert_counts={
+                0: {0: 10, 1: 10, 2: 10, 3: 10},  # Uniform distribution
+                1: {0: 40, 1: 0, 2: 0, 3: 0},  # Collapsed distribution
+            },
+            total_prompts=10,
+            n_experts_per_layer=4,
+            top_k=2,
+        )
+        mock_model.track_expert_activations = MagicMock(return_value=mock_activations)
+
+        entropies = Model.compute_routing_entropy(mock_model, ["prompt1", "prompt2"])
+
+        assert isinstance(entropies, dict)
+        assert 0 in entropies
+        assert 1 in entropies
+        # Uniform distribution should have higher entropy than collapsed
+        assert entropies[0] > entropies[1]
+
+    def test_compute_routing_entropy_empty_on_non_moe(self):
+        """Test compute_routing_entropy returns empty dict for non-MoE model."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+        mock_model.track_expert_activations = MagicMock(return_value=None)
+
+        entropies = Model.compute_routing_entropy(mock_model, ["prompt"])
+
+        assert entropies == {}
+
+    def test_compute_routing_entropy_handles_zero_counts(self):
+        """Test compute_routing_entropy handles zero activation counts gracefully."""
+        from bruno.model import Model, MoEExpertActivations
+
+        mock_model = MagicMock()
+
+        # All zeros - should return entropy 0
+        mock_activations = MoEExpertActivations(
+            layer_expert_counts={
+                0: {0: 0, 1: 0, 2: 0, 3: 0},
+            },
+            total_prompts=0,
+            n_experts_per_layer=4,
+            top_k=2,
+        )
+        mock_model.track_expert_activations = MagicMock(return_value=mock_activations)
+
+        entropies = Model.compute_routing_entropy(mock_model, ["prompt"])
+
+        assert entropies[0] == 0.0
+
+
+class TestMoERoutingHealth:
+    """Test MoE routing health checks."""
+
+    def test_check_routing_health_returns_true_for_healthy_routing(self):
+        """Test check_routing_health returns True when entropy is above threshold."""
+        import math
+
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Uniform distribution across 4 experts -> max entropy = log(4) = 1.386
+        # Normalized entropy = 1.386 / 1.386 = 1.0 > 0.5 threshold
+        mock_model.compute_routing_entropy = MagicMock(
+            return_value={0: math.log(4), 1: math.log(4)}
+        )
+        mock_model.get_moe_config = MagicMock(return_value=(4, 2))
+
+        is_healthy = Model.check_routing_health(mock_model, ["prompt"], min_entropy=0.5)
+
+        assert is_healthy is True
+
+    def test_check_routing_health_returns_false_for_collapsed_routing(self):
+        """Test check_routing_health returns False when entropy is below threshold."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Very low entropy (nearly collapsed)
+        mock_model.compute_routing_entropy = MagicMock(return_value={0: 0.1, 1: 0.1})
+        mock_model.get_moe_config = MagicMock(
+            return_value=(4, 2)
+        )  # max_entropy = log(4) = 1.386
+
+        is_healthy = Model.check_routing_health(mock_model, ["prompt"], min_entropy=0.5)
+
+        # normalized = 0.1 / 1.386 = 0.072 < 0.5
+        assert is_healthy is False
+
+    def test_check_routing_health_returns_true_for_non_moe(self):
+        """Test check_routing_health returns True for non-MoE models."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+        mock_model.compute_routing_entropy = MagicMock(return_value={})
+
+        is_healthy = Model.check_routing_health(mock_model, ["prompt"])
+
+        assert is_healthy is True
+
+    def test_check_routing_health_handles_invalid_moe_config(self):
+        """Test check_routing_health handles invalid MoE config gracefully."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+        mock_model.compute_routing_entropy = MagicMock(return_value={0: 0.5})
+        mock_model.get_moe_config = MagicMock(return_value=None)
+
+        # Should not raise, should return True (assume healthy)
+        is_healthy = Model.check_routing_health(mock_model, ["prompt"])
+
+        assert is_healthy is True
+
+
+class TestMoEGateAbliteration:
+    """Test MoE gate abliteration methods."""
+
+    def test_abliterate_gate_modifies_weight(self):
+        """Test abliterate_gate modifies the gate weight matrix."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Create a mock layer with gate - use real tensor for data attribute
+        gate_weight = torch.randn(8, 64)  # 8 experts, 64 hidden dim
+        original_weight = gate_weight.clone()
+
+        # Create a simple object to hold the weight data (not a MagicMock)
+        class MockWeight:
+            def __init__(self, data):
+                self.data = data
+
+        class MockGate:
+            def __init__(self, weight_data):
+                self.weight = MockWeight(weight_data)
+
+        mock_gate = MockGate(gate_weight)
+
+        mock_layer = MagicMock()
+        mock_layer.mlp.gate = mock_gate
+        mock_model.get_layers = MagicMock(return_value=[mock_layer])
+
+        # Refusal direction
+        refusal_direction = torch.randn(64)
+
+        result = Model.abliterate_gate(mock_model, 0, refusal_direction, strength=1.0)
+
+        assert result is True
+        # Weight should have been modified (gate.weight.data is reassigned)
+        assert not torch.allclose(mock_gate.weight.data, original_weight)
+
+    def test_abliterate_gate_returns_false_for_no_gate(self):
+        """Test abliterate_gate returns False when layer has no gate."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Layer without gate attribute
+        mock_layer = MagicMock(spec=[])
+        mock_layer.mlp = MagicMock(spec=[])  # No 'gate' attribute
+        mock_model.get_layers = MagicMock(return_value=[mock_layer])
+
+        result = Model.abliterate_gate(mock_model, 0, torch.randn(64), strength=1.0)
+
+        assert result is False
+
+    def test_abliterate_gate_returns_false_for_no_weight(self):
+        """Test abliterate_gate returns False when gate has no weight."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Gate without weight attribute
+        mock_gate = MagicMock(spec=[])  # No 'weight' attribute
+        mock_layer = MagicMock()
+        mock_layer.mlp.gate = mock_gate
+        mock_model.get_layers = MagicMock(return_value=[mock_layer])
+
+        result = Model.abliterate_gate(mock_model, 0, torch.randn(64), strength=1.0)
+
+        assert result is False
+
+    def test_abliterate_gate_respects_strength(self):
+        """Test abliterate_gate scales modification by strength."""
+        from bruno.model import Model
+
+        # Create simple mock classes to hold weight data (not MagicMock)
+        class MockWeight:
+            def __init__(self, data):
+                self.data = data
+
+        class MockGate:
+            def __init__(self, weight_data):
+                self.weight = MockWeight(weight_data)
+
+        # Create identical gates for comparison
+        original_weight = torch.randn(8, 64)
+        gate_weight_1 = original_weight.clone()
+        gate_weight_2 = original_weight.clone()
+
+        mock_gate_1 = MockGate(gate_weight_1)
+        mock_gate_2 = MockGate(gate_weight_2)
+
+        mock_layer_1 = MagicMock()
+        mock_layer_1.mlp.gate = mock_gate_1
+        mock_layer_2 = MagicMock()
+        mock_layer_2.mlp.gate = mock_gate_2
+
+        refusal_direction = torch.randn(64)
+
+        # Abliterate with different strengths
+        mock_model_1 = MagicMock()
+        mock_model_1.get_layers = MagicMock(return_value=[mock_layer_1])
+        Model.abliterate_gate(mock_model_1, 0, refusal_direction, strength=0.5)
+
+        mock_model_2 = MagicMock()
+        mock_model_2.get_layers = MagicMock(return_value=[mock_layer_2])
+        Model.abliterate_gate(mock_model_2, 0, refusal_direction, strength=1.0)
+
+        # Higher strength should cause larger change from original
+        diff_1 = (mock_gate_1.weight.data - original_weight).norm()
+        diff_2 = (mock_gate_2.weight.data - original_weight).norm()
+
+        # strength=1.0 should cause larger change than strength=0.5
+        assert diff_2 > diff_1, (
+            f"strength=1.0 change ({diff_2}) should be > strength=0.5 change ({diff_1})"
+        )
+
+
+class TestMoEGatesAbliteration:
+    """Test abliterate_gates method that abliterates all gates."""
+
+    def test_abliterate_gates_calls_abliterate_gate_for_each_layer(self):
+        """Test abliterate_gates calls abliterate_gate for each layer."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # 4 layers
+        mock_layers = [MagicMock() for _ in range(4)]
+        mock_model.get_layers = MagicMock(return_value=mock_layers)
+
+        # Track abliterate_gate calls
+        abliterate_calls = []
+
+        def mock_abliterate_gate(layer_idx, direction, strength):
+            abliterate_calls.append((layer_idx, strength))
+            return True
+
+        mock_model.abliterate_gate = mock_abliterate_gate
+        mock_model.get_layer_multiplier = Model.get_layer_multiplier.__get__(
+            mock_model, Model
+        )
+
+        # Refusal directions: embedding + 4 layers
+        refusal_directions = torch.randn(5, 64)
+
+        count = Model.abliterate_gates(
+            mock_model, refusal_directions, strength=0.5, layer_profiles=None
+        )
+
+        assert count == 4
+        assert len(abliterate_calls) == 4
+        # Check all layers were called
+        called_layers = [call[0] for call in abliterate_calls]
+        assert sorted(called_layers) == [0, 1, 2, 3]
+
+    def test_abliterate_gates_skips_nan_directions(self):
+        """Test abliterate_gates skips layers with NaN/Inf directions."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+        mock_model.get_layers = MagicMock(return_value=[MagicMock(), MagicMock()])
+
+        calls = []
+
+        def mock_abliterate_gate(layer_idx, direction, strength):
+            calls.append(layer_idx)
+            return True
+
+        mock_model.abliterate_gate = mock_abliterate_gate
+        mock_model.get_layer_multiplier = MagicMock(return_value=1.0)
+
+        # Create directions with NaN in layer 0
+        refusal_directions = torch.randn(3, 64)
+        refusal_directions[1] = float("nan")  # Layer 0 direction (offset by 1)
+
+        count = Model.abliterate_gates(
+            mock_model, refusal_directions, strength=1.0, layer_profiles=None
+        )
+
+        # Only layer 1 should be abliterated (layer 0 has NaN)
+        assert count == 1
+        assert 1 in calls
+        assert 0 not in calls
+
+    def test_abliterate_gates_applies_layer_profiles(self):
+        """Test abliterate_gates respects layer profile multipliers."""
+        from bruno.model import LayerRangeProfile, Model
+
+        mock_model = MagicMock()
+        mock_model.get_layers = MagicMock(return_value=[MagicMock() for _ in range(4)])
+
+        strengths = []
+
+        def mock_abliterate_gate(layer_idx, direction, strength):
+            strengths.append((layer_idx, strength))
+            return True
+
+        mock_model.abliterate_gate = mock_abliterate_gate
+        mock_model.get_layer_multiplier = Model.get_layer_multiplier.__get__(
+            mock_model, Model
+        )
+
+        refusal_directions = torch.randn(5, 64)
+
+        # Profile: early layers (0-50%) get 0 multiplier, late layers get 1.0
+        layer_profiles = [
+            LayerRangeProfile(range_start=0.0, range_end=0.5, weight_multiplier=0.0),
+            LayerRangeProfile(range_start=0.5, range_end=1.0, weight_multiplier=1.0),
+        ]
+
+        Model.abliterate_gates(
+            mock_model, refusal_directions, strength=1.0, layer_profiles=layer_profiles
+        )
+
+        # Layers 0, 1 (positions 0.0, 0.33) should have strength 0
+        # Layers 2, 3 (positions 0.67, 1.0) should have strength 1.0
+        for layer_idx, strength in strengths:
+            if layer_idx in [0, 1]:
+                assert strength == 0.0, f"Layer {layer_idx} should have 0 strength"
+            else:
+                assert strength == 1.0, f"Layer {layer_idx} should have 1.0 strength"
+
+
+class TestMoETwoStageAbliteration:
+    """Test two-stage MoE abliteration."""
+
+    def test_abliterate_moe_two_stage_returns_stats(self):
+        """Test abliterate_moe_two_stage returns statistics dict."""
+        from bruno.model import AbliterationParameters, Model
+
+        mock_model = MagicMock()
+        mock_evaluator = MagicMock()
+
+        # Mock all the methods called by two-stage
+        mock_model.abliterate_gates = MagicMock(return_value=4)
+        mock_model.check_routing_health = MagicMock(return_value=True)
+        mock_model.track_expert_activations = MagicMock(
+            return_value=MagicMock(
+                layer_expert_counts={0: {0: 10, 1: 5}},
+                n_experts_per_layer=8,
+                top_k=2,
+            )
+        )
+        mock_model.get_moe_targeted_experts = MagicMock(return_value={0: [0, 1]})
+        mock_model.settings = MagicMock()
+        mock_model.settings.moe_top_k_experts = 8
+        mock_model.abliterate_moe_targeted = MagicMock(
+            return_value={
+                "attn_ablated": 4,
+                "experts_ablated": 8,
+                "shared_experts_ablated": 2,
+            }
+        )
+        mock_model.compute_expert_compliance_scores = MagicMock(
+            return_value={0: {0: 0.5, 1: -0.3}}
+        )
+        mock_model.modify_expert_biases = MagicMock(return_value=4)
+
+        refusal_directions = torch.randn(5, 64)
+        bad_prompts = ["bad1", "bad2"]
+        parameters = {
+            "attn.o_proj": AbliterationParameters(
+                max_weight=1.0,
+                max_weight_position=2.0,
+                min_weight=0.0,
+                min_weight_distance=4.0,
+            ),
+        }
+
+        stats = Model.abliterate_moe_two_stage(
+            mock_model,
+            refusal_directions,
+            bad_prompts,
+            parameters,
+            mock_evaluator,
+            gate_strength=0.3,
+            expert_threshold=0.1,
+            use_bias_manipulation=True,
+        )
+
+        assert isinstance(stats, dict)
+        assert "gates_ablated" in stats
+        assert "experts_ablated" in stats
+        assert "shared_experts_ablated" in stats
+        assert "biases_modified" in stats
+        assert stats["gates_ablated"] == 4
+
+    def test_abliterate_moe_two_stage_stops_on_routing_collapse(self):
+        """Test two-stage abliteration stops early if routing collapses."""
+        from bruno.model import AbliterationParameters, Model
+
+        mock_model = MagicMock()
+        mock_evaluator = MagicMock()
+
+        mock_model.abliterate_gates = MagicMock(return_value=4)
+        # Routing collapsed!
+        mock_model.check_routing_health = MagicMock(return_value=False)
+
+        refusal_directions = torch.randn(5, 64)
+        parameters = {
+            "attn.o_proj": AbliterationParameters(
+                max_weight=1.0,
+                max_weight_position=2.0,
+                min_weight=0.0,
+                min_weight_distance=4.0,
+            ),
+        }
+
+        stats = Model.abliterate_moe_two_stage(
+            mock_model,
+            refusal_directions,
+            ["bad"],
+            parameters,
+            mock_evaluator,
+        )
+
+        # Should have routing_collapsed flag set
+        assert stats["routing_collapsed"] == 1
+        # Should not have proceeded to expert abliteration
+        assert stats.get("experts_ablated", 0) == 0
+
+    def test_abliterate_moe_two_stage_skips_bias_manipulation_when_disabled(self):
+        """Test two-stage abliteration skips bias manipulation when disabled."""
+        from bruno.model import AbliterationParameters, Model
+
+        mock_model = MagicMock()
+        mock_evaluator = MagicMock()
+
+        mock_model.abliterate_gates = MagicMock(return_value=4)
+        mock_model.check_routing_health = MagicMock(return_value=True)
+        mock_model.track_expert_activations = MagicMock(
+            return_value=MagicMock(
+                layer_expert_counts={0: {0: 10}},
+                n_experts_per_layer=8,
+                top_k=2,
+            )
+        )
+        mock_model.get_moe_targeted_experts = MagicMock(return_value={})
+        mock_model.settings = MagicMock()
+        mock_model.settings.moe_top_k_experts = 8
+        mock_model.abliterate_moe_targeted = MagicMock(
+            return_value={
+                "attn_ablated": 0,
+                "experts_ablated": 0,
+                "shared_experts_ablated": 0,
+            }
+        )
+        mock_model.compute_expert_compliance_scores = MagicMock()
+        mock_model.modify_expert_biases = MagicMock()
+
+        refusal_directions = torch.randn(5, 64)
+        parameters = {
+            "attn.o_proj": AbliterationParameters(
+                max_weight=1.0,
+                max_weight_position=2.0,
+                min_weight=0.0,
+                min_weight_distance=4.0,
+            ),
+        }
+
+        Model.abliterate_moe_two_stage(
+            mock_model,
+            refusal_directions,
+            ["bad"],
+            parameters,
+            mock_evaluator,
+            use_bias_manipulation=False,  # Disabled!
+        )
+
+        # Bias manipulation should not be called
+        mock_model.compute_expert_compliance_scores.assert_not_called()
+        mock_model.modify_expert_biases.assert_not_called()
+
+    def test_abliterate_moe_two_stage_handles_tracking_failure(self):
+        """Test two-stage abliteration handles activation tracking failure gracefully."""
+        from bruno.model import AbliterationParameters, Model
+
+        mock_model = MagicMock()
+        mock_evaluator = MagicMock()
+
+        mock_model.abliterate_gates = MagicMock(return_value=4)
+        mock_model.check_routing_health = MagicMock(return_value=True)
+        # Tracking fails
+        mock_model.track_expert_activations = MagicMock(return_value=None)
+
+        refusal_directions = torch.randn(5, 64)
+        parameters = {
+            "attn.o_proj": AbliterationParameters(
+                max_weight=1.0,
+                max_weight_position=2.0,
+                min_weight=0.0,
+                min_weight_distance=4.0,
+            ),
+        }
+
+        stats = Model.abliterate_moe_two_stage(
+            mock_model,
+            refusal_directions,
+            ["bad"],
+            parameters,
+            mock_evaluator,
+        )
+
+        # Should return early with only gates_ablated populated
+        assert stats["gates_ablated"] == 4
+        assert stats.get("experts_ablated", 0) == 0
+
+
+class TestMoEExpertComplianceScores:
+    """Test expert compliance score computation."""
+
+    def test_compute_expert_compliance_scores_returns_dict(self):
+        """Test compute_expert_compliance_scores returns layer->expert->score mapping."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+        mock_evaluator = MagicMock()
+
+        # Mock per-prompt activations
+        mock_model._track_expert_activations_per_prompt = MagicMock(
+            return_value={
+                0: {  # Layer 0
+                    0: {0, 1},  # Prompt 0 activated experts 0, 1
+                    1: {0},  # Prompt 1 activated expert 0
+                    2: {1, 2},  # Prompt 2 activated experts 1, 2
+                }
+            }
+        )
+
+        # Mock responses and refusal detection
+        mock_model.get_responses_batched = MagicMock(
+            return_value=["I refuse", "Here's help", "I cannot"]
+        )
+        mock_evaluator.is_refusal = MagicMock(
+            side_effect=[True, False, True]  # Prompts 0, 2 are refusals
+        )
+
+        scores = Model.compute_expert_compliance_scores(
+            mock_model, ["p1", "p2", "p3"], mock_evaluator
+        )
+
+        assert isinstance(scores, dict)
+        assert 0 in scores  # Layer 0
+        # Expert 0: activated on prompt 0 (refusal) and prompt 1 (comply)
+        # Expert 1: activated on prompt 0 (refusal) and prompt 2 (refusal)
+        # Expert 2: activated on prompt 2 (refusal)
+        assert 0 in scores[0]  # Expert 0 should be scored
+        assert 1 in scores[0]  # Expert 1 should be scored
+        assert 2 in scores[0]  # Expert 2 should be scored
+
+    def test_compute_expert_compliance_scores_empty_on_tracking_failure(self):
+        """Test compute_expert_compliance_scores returns empty dict when tracking fails."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+        mock_evaluator = MagicMock()
+
+        mock_model._track_expert_activations_per_prompt = MagicMock(return_value=None)
+
+        scores = Model.compute_expert_compliance_scores(
+            mock_model, ["prompt"], mock_evaluator
+        )
+
+        assert scores == {}
+
+
+class TestMoEBiasManipulation:
+    """Test MoE gate bias manipulation."""
+
+    def test_modify_expert_biases_modifies_e_score_correction(self):
+        """Test modify_expert_biases modifies the gate bias tensor."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Create mock layer with gate that has e_score_correction
+        bias_tensor = torch.zeros(8)  # 8 experts
+        mock_gate = MagicMock()
+        mock_gate.e_score_correction = MagicMock()
+        mock_gate.e_score_correction.data = bias_tensor
+
+        mock_layer = MagicMock()
+        mock_layer.mlp.gate = mock_gate
+        mock_model.get_layers = MagicMock(return_value=[mock_layer])
+
+        # Expert scores: expert 0 is compliant, expert 1 is refusing
+        expert_scores = {
+            0: {0: 0.8, 1: -0.6}  # Layer 0
+        }
+
+        count = Model.modify_expert_biases(mock_model, expert_scores, bias_delta=0.3)
+
+        assert count == 2
+        # Expert 0 should have positive bias adjustment (0.8 * 0.3 = 0.24)
+        assert bias_tensor[0] > 0
+        # Expert 1 should have negative bias adjustment (-0.6 * 0.3 = -0.18)
+        assert bias_tensor[1] < 0
+
+    def test_modify_expert_biases_returns_zero_for_no_bias(self):
+        """Test modify_expert_biases returns 0 when gate has no e_score_correction."""
+        from bruno.model import Model
+
+        mock_model = MagicMock()
+
+        # Gate without e_score_correction
+        mock_gate = MagicMock(spec=["weight"])  # Only has weight, no e_score_correction
+        mock_layer = MagicMock()
+        mock_layer.mlp.gate = mock_gate
+        mock_model.get_layers = MagicMock(return_value=[mock_layer])
+
+        expert_scores = {0: {0: 0.5}}
+
+        count = Model.modify_expert_biases(mock_model, expert_scores, bias_delta=0.3)
+
+        assert count == 0
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 class TestModelIntegration:
