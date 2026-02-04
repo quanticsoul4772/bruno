@@ -664,19 +664,61 @@ bruno --use-caa false
 See `docs/ABLITERATION_CHECKLIST.md` for full Moonlight setup guide.
 
 ### HuggingFace Inference Endpoint Deployment
-**Problem:** vLLM fails to load Moonlight with `ValueError: Please pass the argument trust_remote_code=True`
 
-**Cause:** Moonlight uses custom modeling code and requires `trust_remote_code=True` to load.
+**Successfully deployed:** Moonlight-16B-A3B-Instruct-bruno on HuggingFace Inference Endpoints with vLLM.
 
-**Solution:** Configure the model repository with trust_remote_code before deploying endpoint:
+#### Requirements for Moonlight Deployment
 
+1. **GPU:** A100 80GB minimum (L40S 48GB insufficient - model is 63GB)
+2. **Custom code files:** Model repository must contain:
+   - `modeling_deepseek.py` (custom architecture)
+   - `configuration_deepseek.py` (config class)
+   - `tokenization_moonshot.py` (custom tokenizer)
+
+3. **Configuration files properly formatted:**
+   - `config.json` with `trust_remote_code: true`
+   - `config.json` auto_map using local files (not remote repo references)
+   - `tokenizer_config.json` auto_map format: `["tokenization_moonshot.TikTokenTokenizer", None]` (must be list)
+
+4. **vLLM container argument:** `--trust-remote-code`
+
+#### Step-by-Step Deployment Process
+
+**Step 1: Prepare Model Repository**
+
+Copy all custom code files to your abliterated model repo:
 ```python
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, hf_hub_download
+
+api = HfApi(token=HF_TOKEN)
+
+# Copy modeling files from original to abliterated repo
+files_to_copy = [
+    'modeling_deepseek.py',
+    'configuration_deepseek.py',
+    'tokenization_moonshot.py'
+]
+
+for filename in files_to_copy:
+    file_path = hf_hub_download(
+        repo_id='moonshotai/Moonlight-16B-A3B-Instruct',
+        filename=filename
+    )
+    api.upload_file(
+        path_or_fileobj=file_path,
+        path_in_repo=filename,
+        repo_id='rawcell/Moonlight-16B-A3B-Instruct-bruno',
+        repo_type='model'
+    )
+```
+
+**Step 2: Fix config.json auto_map**
+
+Update to use local files instead of remote repo:
+```python
 import json
 
-api = HfApi(token=YOUR_TOKEN)
-
-# Download config.json
+# Download, modify, upload config.json
 config_path = api.hf_hub_download(
     repo_id='rawcell/Moonlight-16B-A3B-Instruct-bruno',
     filename='config.json'
@@ -685,7 +727,12 @@ config_path = api.hf_hub_download(
 with open(config_path) as f:
     config = json.load(f)
 
-# Add trust_remote_code
+# Update auto_map to local files
+config['auto_map'] = {
+    'AutoConfig': 'configuration_deepseek.DeepseekV3Config',
+    'AutoModel': 'modeling_deepseek.DeepseekV3Model',
+    'AutoModelForCausalLM': 'modeling_deepseek.DeepseekV3ForCausalLM'
+}
 config['trust_remote_code'] = True
 
 # Upload back
@@ -700,9 +747,61 @@ api.upload_file(
 )
 ```
 
-**Alternative:** Add environment variable to Inference Endpoint:
-- Key: `VLLM_TRUST_REMOTE_CODE`
-- Value: `1`
+**Step 3: Fix tokenizer_config.json auto_map**
+
+Must be a list format:
+```python
+config_path = api.hf_hub_download(
+    repo_id='rawcell/Moonlight-16B-A3B-Instruct-bruno',
+    filename='tokenizer_config.json'
+)
+
+with open(config_path) as f:
+    tokenizer_config = json.load(f)
+
+# CRITICAL: auto_map must be a list, not string
+tokenizer_config['auto_map'] = {
+    'AutoTokenizer': ['tokenization_moonshot.TikTokenTokenizer', None]
+}
+
+# Upload back
+with open('temp_tokenizer_config.json', 'w') as f:
+    json.dump(tokenizer_config, f, indent=2)
+
+api.upload_file(
+    path_or_fileobj='temp_tokenizer_config.json',
+    path_in_repo='tokenizer_config.json',
+    repo_id='rawcell/Moonlight-16B-A3B-Instruct-bruno',
+    repo_type='model'
+)
+```
+
+**Step 4: Create Inference Endpoint**
+
+On HuggingFace Inference Endpoints UI:
+1. Select model: `rawcell/Moonlight-16B-A3B-Instruct-bruno`
+2. Hardware: **Nvidia A100 80GB** (minimum)
+3. Region: Any AWS region
+4. **Advanced Configuration** → **Container Arguments:** `--trust-remote-code`
+5. Click "Create Endpoint"
+
+**Step 5: Test Endpoint**
+
+Use the provided chat script:
+```bash
+python examples/chat_endpoint.py https://YOUR-ENDPOINT-URL.endpoints.huggingface.cloud
+```
+
+**Cost:** ~$2.50/hour while running, auto-scales to zero after 1 hour of inactivity.
+
+**Common Errors:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ValueError: trust_remote_code=True` | Container arg not set | Add `--trust-remote-code` to Container Arguments |
+| `ValueError: not enough values to unpack` | auto_map wrong format | Use list format: `["module.Class", None]` |
+| `500 Internal Server Error` | GPU too small | Use A100 80GB minimum (not L40S 48GB) |
+| Model loads wrong repo | auto_map points to original | Update auto_map to use local files |
 
 ### Ensemble Probe Failing
 **Problem:** `SupervisedProbeError` about class imbalance or low accuracy.
