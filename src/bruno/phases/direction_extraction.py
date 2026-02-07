@@ -19,7 +19,7 @@ from torch import Tensor
 from ..config import Settings
 from ..constants import LOW_MAGNITUDE_WARNING
 from ..error_tracker import record_suppressed_error
-from ..exceptions import SacredDirectionError
+from ..exceptions import ResidualExtractionError, SacredDirectionError
 from ..logging import get_logger
 from ..model import Model, SacredDirectionResult
 from ..utils import empty_cache, get_gpu_memory_info, print
@@ -205,9 +205,7 @@ def apply_helpfulness_orthogonalization(
             sacred_directions_result=result.sacred_directions_result,
         )
 
-    except torch.cuda.OutOfMemoryError:
-        import questionary
-
+    except (torch.cuda.OutOfMemoryError, ResidualExtractionError):
         from ..errors import print_error
         from ..feature_tracker import feature_tracker
 
@@ -233,12 +231,21 @@ def apply_helpfulness_orthogonalization(
             },
         )
 
-        # Ask user if they want to continue
-        print()
-        continue_choice = questionary.confirm(
-            "Continue without helpfulness orthogonalization?",
-            default=True,
-        ).ask()
+        # In non-interactive mode (e.g. nohup), auto-continue
+        try:
+            import questionary
+
+            print()
+            continue_choice = questionary.confirm(
+                "Continue without helpfulness orthogonalization?",
+                default=True,
+            ).ask()
+        except (EOFError, OSError, KeyboardInterrupt):
+            continue_choice = True
+
+        # questionary returns None in non-interactive mode, default to continue
+        if continue_choice is None:
+            continue_choice = True
 
         if not continue_choice:
             print("[red]Aborting abliteration run[/]")

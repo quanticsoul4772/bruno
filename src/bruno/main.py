@@ -52,7 +52,7 @@ from accelerate.utils import (
     is_sdaa_available,
     is_xpu_available,
 )
-from huggingface_hub import ModelCard, ModelCardData, get_token
+from huggingface_hub import ModelCard, ModelCardData
 from huggingface_hub.errors import HfHubHTTPError
 from optuna import Trial
 from optuna.exceptions import ExperimentalWarning
@@ -77,6 +77,7 @@ from .exceptions import (
     AbliterationError,
     BatchSizeError,
     ConceptConeError,
+    GateAbliterationError,
     ModelInferenceError,
     MoEAbliterationError,
     ResidualExtractionError,
@@ -232,8 +233,12 @@ def run():
         feature_tracker.request("warm_start")
     if settings.orthogonalize_directions:
         feature_tracker.request("helpfulness_orthogonalization")
-    if settings.use_moe_targeting:
+    if settings.use_router_aware_targeting:
         feature_tracker.request("moe_targeting")
+    if settings.use_gate_abliteration:
+        feature_tracker.request("gate_abliteration")
+    if settings.use_two_stage_moe_abliteration:
+        feature_tracker.request("two_stage_moe")
 
     # Early GQA detection for circuit ablation
     # Check immediately after model load to fail fast instead of after direction extraction
@@ -708,8 +713,8 @@ def run():
                     "Standard ablation without compliance addition",
                 )
                 logger.warning(
-                    "CAA extraction failed due to insufficient samples",
-                    reason="Need 10+ refusals and 10+ compliant responses",
+                    "CAA extraction failed due to insufficient samples: "
+                    "Need 10+ refusals and 10+ compliant responses"
                 )
                 compliance_direction = None
         except torch.cuda.OutOfMemoryError:
@@ -885,16 +890,30 @@ def run():
         trial_params: dict[str, AbliterationParameters],
         direction_index: float | None,
         skip_reload: bool = False,
+        gate_strength: float | None = None,
     ) -> None:
         """Restore model and apply abliteration based on trial parameters.
 
         This helper function centralizes the abliteration logic to avoid duplication
         across validation, auto-select, and interactive modes.
+
+        Args:
+            trial_params: Abliteration parameters per component
+            direction_index: Direction index for global mode, or None for per-layer
+            skip_reload: If True, skip model reload (for first trial)
+            gate_strength: Strength for MoE gate abliteration (None uses config default)
         """
         nonlocal moe_targeted_experts  # Allow modification of outer scope variable
 
         if not skip_reload:
             model.reload_model()
+
+        # Use provided gate_strength or config default
+        effective_gate_strength = (
+            gate_strength
+            if gate_strength is not None
+            else settings.gate_abliteration_strength
+        )
 
         # Get residuals for activation calibration if needed
         calibrated_params = trial_params
@@ -930,6 +949,66 @@ def run():
             )
             del bad_residuals_cal
             empty_cache()
+
+        # MoE Abliteration Path Selection
+        # Two-stage MoE abliteration is the recommended approach for MoE models
+        if model.is_moe_model():
+            if settings.use_two_stage_moe_abliteration:
+                # Two-stage approach: gate first, re-track, then experts
+                print("  * Using two-stage MoE abliteration...")
+                logger.info(
+                    "Applying two-stage MoE abliteration",
+                    gate_strength=effective_gate_strength,
+                    use_mpoa=settings.use_mpoa,
+                )
+                try:
+                    moe_stats = model.abliterate_moe_two_stage(
+                        refusal_directions,
+                        bad_prompts,
+                        calibrated_params,
+                        evaluator,
+                        gate_strength=effective_gate_strength,
+                        expert_threshold=settings.moe_expert_activation_threshold,
+                        layer_profiles=layer_profiles,
+                        use_mpoa=settings.use_mpoa,
+                        mpoa_norm_mode=settings.mpoa_norm_mode,
+                        mpoa_min_scale=settings.mpoa_min_scale,
+                        mpoa_max_scale=settings.mpoa_max_scale,
+                        use_bias_manipulation=settings.use_bias_manipulation,
+                        bias_delta=settings.bias_manipulation_delta,
+                    )
+                    if moe_stats.get("routing_collapsed", 0) > 0:
+                        print(
+                            "[yellow]  * Warning: Routing collapsed after gate ablation[/yellow]"
+                        )
+                    print(
+                        f"  * Two-stage MoE abliteration complete: "
+                        f"{moe_stats.get('gates_ablated', 0)} gates, "
+                        f"{moe_stats.get('experts_ablated', 0)} experts, "
+                        f"{moe_stats.get('biases_modified', 0)} biases modified"
+                    )
+                except MoEAbliterationError as e:
+                    print(f"[red]  * Two-stage MoE abliteration failed: {e}[/red]")
+                    print("[yellow]  * Falling back to single-pass mode...[/yellow]")
+                else:
+                    return  # Two-stage handles all abliteration
+
+            # Single-pass MoE abliteration: gate ablation followed by targeted expert ablation
+            if settings.use_gate_abliteration:
+                print("  * Abliterating MoE gates...")
+                gates_ablated = model.abliterate_gates(
+                    refusal_directions,
+                    strength=effective_gate_strength,
+                    layer_profiles=layer_profiles,
+                )
+                print(f"  * Abliterated {gates_ablated} MoE gates")
+
+                # Check routing health after gate ablation
+                if not model.check_routing_health(bad_prompts[:20]):
+                    print(
+                        "[yellow]  * Warning: Routing collapsed after gate ablation[/yellow]"
+                    )
+                    logger.warning("Routing collapsed after gate ablation")
 
         # MoE Router-Aware Expert Targeting (if enabled and set up)
         # This is the primary abliteration path for MoE models - it handles attention,
@@ -1127,6 +1206,12 @@ def run():
             ],
         )
 
+        # MoE Gate Abliteration strength (only for MoE models)
+        if model.is_moe_model() and settings.gate_abliteration_optuna:
+            gate_strength = trial.suggest_float("gate_abliteration_strength", 0.0, 0.5)
+        else:
+            gate_strength = settings.gate_abliteration_strength
+
         # Discrimination between "harmful" and "harmless" inputs is usually strongest
         # in layers slightly past the midpoint of the layer stack. See the original
         # abliteration paper (https://arxiv.org/abs/2406.11717) for a deeper analysis.
@@ -1183,6 +1268,7 @@ def run():
             )
 
         trial.set_user_attr("direction_index", direction_index)
+        trial.set_user_attr("gate_strength", gate_strength)
         # Convert AbliterationParameters to dicts for JSON serialization (required for SQLite storage)
         trial.set_user_attr("parameters", {k: asdict(v) for k, v in parameters.items()})
 
@@ -1195,7 +1281,9 @@ def run():
             print(f"  * {name} = [bold]{value}[/]")
         print("* Reloading model...")
         print("* Abliterating...")
-        restore_and_abliterate_trial(parameters, direction_index, skip_reload=False)
+        restore_and_abliterate_trial(
+            parameters, direction_index, skip_reload=False, gate_strength=gate_strength
+        )
 
         print("* Evaluating...")
         try:
@@ -1358,6 +1446,9 @@ def run():
             restore_and_abliterate_trial(
                 parameters,
                 best_trial.user_attrs["direction_index"],
+                gate_strength=best_trial.user_attrs.get(
+                    "gate_strength", settings.gate_abliteration_strength
+                ),
             )
             validator.measure_post_abliteration()
             validator.print_summary()
@@ -1404,6 +1495,9 @@ def run():
         restore_and_abliterate_trial(
             parameters,
             trial.user_attrs["direction_index"],
+            gate_strength=trial.user_attrs.get(
+                "gate_strength", settings.gate_abliteration_strength
+            ),
         )
 
         # Determine save path
@@ -1419,12 +1513,55 @@ def run():
 
         # Auto-upload to HuggingFace if --hf-upload is specified
         if settings.hf_upload:
+            # Get validation report and active features for rich model card
+            validation_report = (
+                validator.get_report() if validator.post_abliteration else None
+            )
+            features_active = feature_tracker.get_summary()["active"]
+
             upload_model_huggingface(
                 model=model,
                 settings=settings,
                 trial=trial,
                 evaluator=evaluator,
+                validation_report=validation_report,
+                features_active=features_active,
             )
+
+        # Phase 5: GGUF conversion (Feature 4-5)
+        if settings.enable_gguf_conversion:
+            from .phases.gguf_conversion import (
+                convert_and_quantize,
+                generate_gguf_readme,
+                upload_gguf_files,
+            )
+
+            print()
+            print("[bold]Converting to GGUF format...[/]")
+
+            try:
+                gguf_files = convert_and_quantize(save_directory, settings)
+
+                # Upload GGUF files if requested
+                if settings.gguf_upload and settings.hf_upload:
+                    model_card = generate_gguf_readme(
+                        base_repo_id=settings.hf_upload,
+                        model_name=Path(save_directory).name,
+                        gguf_files=gguf_files,
+                    )
+                    from huggingface_hub import get_token
+
+                    upload_gguf_files(
+                        gguf_files=gguf_files,
+                        base_repo_id=settings.hf_upload,
+                        token=get_token(),
+                        model_card_text=model_card,
+                    )
+
+            except FileNotFoundError as e:
+                print(f"[yellow]GGUF conversion skipped: {e}[/]")
+            except Exception as e:
+                print(f"[red]GGUF conversion failed: {e}[/]")
 
         # Print summary report
         from .summary import AbliterationSummary
@@ -1448,9 +1585,7 @@ def run():
             initial_refusals=evaluator.base_refusals,
             best_parameters=trial.params,
             total_errors_suppressed=error_tracker.count(),
-            error_categories={
-                cat: len(errs) for cat, errs in error_tracker.errors.items()
-            },
+            error_categories={},  # TODO: Restore error categorization after ErrorTracker API is clarified
         )
 
         summary.print_report()
@@ -1490,6 +1625,9 @@ def run():
         restore_and_abliterate_trial(
             parameters,
             trial.user_attrs["direction_index"],
+            gate_strength=trial.user_attrs.get(
+                "gate_strength", settings.gate_abliteration_strength
+            ),
         )
 
         while True:
@@ -1573,21 +1711,46 @@ def run():
                         # to be a model hosted on the Hugging Face Hub, in which case
                         # we can retrieve the model card.
                         if not Path(settings.model).exists():
+                            from .phases.model_saving import _get_model_tags
+
                             card = ModelCard.load(settings.model)
                             if card.data is None:
                                 card.data = ModelCardData()
                             if card.data.tags is None:
                                 card.data.tags = []
-                            card.data.tags.append("heretic")
-                            card.data.tags.append("uncensored")
-                            card.data.tags.append("decensored")
-                            card.data.tags.append("abliterated")
+
+                            # Use dynamic tags (Feature 2)
+                            is_moe = (
+                                "moe" in settings.model.lower()
+                                or "moonlight" in settings.model.lower()
+                            )
+                            card.data.tags.extend(
+                                _get_model_tags(settings.model, is_moe)
+                            )
+
+                            # Set YAML frontmatter (Feature 2)
+                            card.data.base_model = settings.model
+                            card.data.pipeline_tag = "text-generation"
+                            card.data.language = ["en"]
+                            card.data.library_name = "transformers"
+
+                            # Get validation report and features for rich card
+                            validation_report = (
+                                validator.get_report()
+                                if validator.post_abliteration
+                                else None
+                            )
+                            features_active = feature_tracker.get_summary()["active"]
+
                             card.text = (
                                 get_readme_intro(
                                     settings,
                                     trial,
                                     evaluator.base_refusals,
                                     evaluator.bad_prompts,
+                                    validation_report=validation_report,
+                                    features_active=features_active,
+                                    repo_id=repo_id,
                                 )
                                 + card.text
                             )
@@ -1666,6 +1829,22 @@ def main():
         print("  - Reducing batch_size")
         print("  - Using --cache-weights false for large models")
         print("  - Checking for corrupted model weights")
+    except GateAbliterationError as error:
+        print()
+        print("[red]Abliteration Failed: Gate Abliteration Error[/]")
+        print(f"[yellow]{error}[/]")
+        print()
+        print("[yellow]Possible causes:[/]")
+        print("  - Routing collapsed after gate ablation")
+        print("  - Gate weight modification failed")
+        print("  - Gate output format not recognized")
+        print()
+        print("[yellow]Try:[/]")
+        print("  - Lowering gate_abliteration_strength")
+        print("  - Disabling gate abliteration: --use-gate-abliteration false")
+        print(
+            "  - Disabling two-stage MoE abliteration: --use-two-stage-moe-abliteration false"
+        )
     except MoEAbliterationError as error:
         print()
         print("[red]Abliteration Failed: MoE-Specific Error[/]")

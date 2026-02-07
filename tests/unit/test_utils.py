@@ -515,12 +515,12 @@ class TestGetReadmeIntro:
         intro = get_readme_intro(mock_settings, mock_trial, base_refusals, bad_prompts)
 
         # Should contain expected sections
-        assert "decensored version" in intro
         assert "test-org/test-model" in intro
         assert "Bruno" in intro
-        assert "Abliteration parameters" in intro
+        assert "abliterated version" in intro.lower()
+        assert "Abliteration Parameters" in intro
         assert "Performance" in intro
-        assert "KL divergence" in intro
+        assert "KL Divergence" in intro
         assert "0.25" in intro
         assert "3/5" in intro  # refusals
         assert "5/5" in intro  # base refusals

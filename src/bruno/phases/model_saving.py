@@ -10,8 +10,12 @@ This module handles saving and uploading abliterated models:
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from huggingface_hub import ModelCard, ModelCardData, get_token
+
+if TYPE_CHECKING:
+    from ..validation import ValidationReport
 from huggingface_hub.errors import HfHubHTTPError
 from optuna import Trial
 
@@ -64,6 +68,8 @@ def upload_model_huggingface(
     repo_id: str | None = None,
     private: bool | None = None,
     token: str | None = None,
+    validation_report: "ValidationReport | None" = None,
+    features_active: list[str] | None = None,
 ) -> bool:
     """Upload the abliterated model to HuggingFace Hub.
 
@@ -75,6 +81,8 @@ def upload_model_huggingface(
         repo_id: HuggingFace repository ID (defaults to settings.hf_upload)
         private: Whether to make the repo private (defaults to settings.hf_private)
         token: HuggingFace token (auto-detected if None)
+        validation_report: Optional validation report with benchmarks
+        features_active: Optional list of active feature names
 
     Returns:
         True if upload succeeded, False otherwise
@@ -116,6 +124,8 @@ def upload_model_huggingface(
                 evaluator=evaluator,
                 repo_id=repo_id,
                 token=token,
+                validation_report=validation_report,
+                features_active=features_active,
             )
 
         print(f"[bold green]Model uploaded to {repo_id}[/]")
@@ -150,12 +160,58 @@ def upload_model_huggingface(
         return False
 
 
+def _get_model_tags(model_name: str, is_moe: bool = False) -> list[str]:
+    """Generate dynamic tags based on model architecture and capabilities.
+
+    Args:
+        model_name: Name of the base model
+        is_moe: Whether the model is a Mixture-of-Experts architecture
+
+    Returns:
+        List of relevant tags for HuggingFace discoverability
+    """
+    tags = ["heretic", "uncensored", "decensored", "abliterated", "text-generation"]
+    name_lower = model_name.lower()
+
+    # Architecture tags
+    if "qwen" in name_lower:
+        tags.append("qwen2")
+    if "llama" in name_lower:
+        tags.append("llama")
+    if "deepseek" in name_lower:
+        tags.append("deepseek")
+    if "gemma" in name_lower:
+        tags.append("gemma")
+    if "phi" in name_lower:
+        tags.append("phi")
+    if "mistral" in name_lower:
+        tags.append("mistral")
+    if "moonlight" in name_lower:
+        tags.append("moonlight")
+
+    # Capability tags
+    if "coder" in name_lower or "code" in name_lower:
+        tags.append("code")
+    if "instruct" in name_lower or "chat" in name_lower:
+        tags.append("conversational")
+    if is_moe or "moe" in name_lower:
+        tags.append("moe")
+
+    # Bruno-specific
+    tags.append("optuna-optimized")
+    tags.append("bruno")
+
+    return tags
+
+
 def _upload_model_card(
     settings: Settings,
     trial: Trial,
     evaluator: Evaluator,
     repo_id: str,
     token: str,
+    validation_report: "ValidationReport | None" = None,
+    features_active: list[str] | None = None,
 ) -> None:
     """Upload a model card to HuggingFace Hub.
 
@@ -165,6 +221,8 @@ def _upload_model_card(
         evaluator: Evaluator instance for model card generation
         repo_id: HuggingFace repository ID
         token: HuggingFace token
+        validation_report: Optional validation report with benchmarks
+        features_active: Optional list of active feature names
     """
     card = ModelCard.load(settings.model)
 
@@ -173,14 +231,28 @@ def _upload_model_card(
     if card.data.tags is None:
         card.data.tags = []
 
-    card.data.tags.extend(["heretic", "uncensored", "decensored", "abliterated"])
+    # Dynamic tags based on model (Feature 2)
+    is_moe = "moe" in settings.model.lower() or "moonlight" in settings.model.lower()
+    new_tags = _get_model_tags(settings.model, is_moe)
+    # Deduplicate tags
+    card.data.tags = list(set(card.data.tags + new_tags))
 
+    # YAML frontmatter metadata (Feature 2)
+    card.data.base_model = settings.model
+    card.data.pipeline_tag = "text-generation"
+    card.data.language = ["en"]
+    card.data.library_name = "transformers"
+
+    # Rich README with benchmarks and usage examples (Features 1, 3, 7)
     card.text = (
         get_readme_intro(
             settings,
             trial,
             evaluator.base_refusals,
             evaluator.bad_prompts,
+            validation_report=validation_report,
+            features_active=features_active,
+            repo_id=repo_id,
         )
         + card.text
     )

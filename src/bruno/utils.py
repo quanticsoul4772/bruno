@@ -6,7 +6,10 @@ import time
 from functools import wraps
 from importlib.metadata import version
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar
+
+if TYPE_CHECKING:
+    from .validation import ValidationReport
 
 import torch
 from accelerate.utils import (
@@ -492,37 +495,263 @@ def get_readme_intro(
     trial: Trial,
     base_refusals: int,
     bad_prompts: list[str],
+    validation_report: "ValidationReport | None" = None,
+    features_active: list[str] | None = None,
+    repo_id: str | None = None,
 ) -> str:
     model_link = f"[{settings.model}](https://huggingface.co/{settings.model})"
+    bruno_version = version("bruno-ai")
 
-    return f"""# This is a decensored version of {
-        model_link
-    }, made using [Bruno](https://github.com/quanticsoul4772/bruno) v{
-        version("bruno-ai")
-    }
+    # Build technique description from active features
+    technique_parts = ["Optuna-optimized abliteration"]
+    if features_active:
+        feature_map = {
+            "mpoa": "MPOA (Norm-Preserving Biprojected Abliteration)",
+            "sacred_directions": "sacred direction preservation",
+            "neural_refusal_detection": "neural refusal detection",
+            "activation_calibration": "activation calibration",
+            "concept_cones": "concept cone extraction",
+            "caa": "Contrastive Activation Addition",
+            "ensemble_probe_pca": "ensemble probe+PCA extraction",
+        }
+        for feature in features_active:
+            if feature in feature_map:
+                technique_parts.append(feature_map[feature])
 
-## Abliteration parameters
+    technique_desc = (
+        ", ".join(technique_parts) if len(technique_parts) > 1 else technique_parts[0]
+    )
 
-| Parameter | Value |
-| :-------- | :---: |
-{
-        chr(10).join(
-            [
-                f"| **{name}** | {value} |"
-                for name, value in get_trial_parameters(trial).items()
-            ]
+    # Start building the README
+    sections = []
+
+    # Title and badge
+    sections.append(f"""# {settings.model.split("/")[-1]}-bruno
+
+> Made with [Bruno](https://github.com/quanticsoul4772/bruno) v{bruno_version} ({technique_desc})
+
+This is an abliterated version of {model_link} with reduced refusals while preserving capabilities.
+""")
+
+    # Bruno Score (Feature 7)
+    if validation_report and isinstance(validation_report, ValidationReport):
+        if validation_report.baseline and validation_report.post_abliteration:
+            bruno_score = validation_report.compute_bruno_score()
+            if bruno_score > 0:
+                # Compute component scores
+                cap_pct = (
+                    1.0
+                    - min(validation_report.kl_divergence_increase / 5.0, 0.5)
+                    - max(-validation_report.mmlu_change, 0.0)
+                ) * 100
+                removal_pct = validation_report.refusal_reduction_pct
+
+                sections.append(f"""## Bruno Score: {bruno_score:.1f} / 100
+
+> {cap_pct:.1f}% capability preserved | {removal_pct:.1f}% refusals removed
+
+""")
+
+    # Benchmark table (if validation report available)
+    if validation_report and isinstance(validation_report, ValidationReport):
+        if validation_report.baseline and validation_report.post_abliteration:
+            base_mmlu = validation_report.baseline.mmlu_scores
+            post_mmlu = validation_report.post_abliteration.mmlu_scores
+
+            if base_mmlu and post_mmlu:
+                sections.append("## Benchmarks\n")
+                sections.append("| Benchmark | This Model | Original Model | Delta |")
+                sections.append("| :-------- | :--------: | :------------: | :---: |")
+
+                # MMLU average first
+                base_avg = validation_report.baseline.mmlu_average
+                post_avg = validation_report.post_abliteration.mmlu_average
+                delta_avg = post_avg - base_avg
+                delta_str = f"{delta_avg:+.1f}%" if delta_avg != 0 else "0.0%"
+                sections.append(
+                    f"| **MMLU (average)** | {post_avg:.1f}% | {base_avg:.1f}% | {delta_str} |"
+                )
+
+                # Individual categories
+                for category in sorted(base_mmlu.keys()):
+                    if category in post_mmlu:
+                        base_score = base_mmlu[category] * 100
+                        post_score = post_mmlu[category] * 100
+                        delta = post_score - base_score
+                        delta_str = f"{delta:+.1f}%" if delta != 0 else "0.0%"
+                        cat_name = category.replace("_", " ").title()
+                        sections.append(
+                            f"| {cat_name} | {post_score:.1f}% | {base_score:.1f}% | {delta_str} |"
+                        )
+
+                # Extended benchmarks (Feature 6)
+                base_ext = validation_report.baseline.extended_benchmarks
+                post_ext = validation_report.post_abliteration.extended_benchmarks
+
+                if base_ext and post_ext:
+                    for bench_name in sorted(base_ext.keys()):
+                        if bench_name in post_ext:
+                            base_score = base_ext[bench_name] * 100
+                            post_score = post_ext[bench_name] * 100
+                            delta = post_score - base_score
+                            delta_str = f"{delta:+.1f}%" if delta != 0 else "0.0%"
+                            sections.append(
+                                f"| **{bench_name}** | {post_score:.1f}% | {base_score:.1f}% | {delta_str} |"
+                            )
+
+                sections.append("")
+
+    # Performance summary
+    sections.append("## Performance\n")
+
+    kl_div = trial.user_attrs.get("kl_divergence", 0)
+    refusals = trial.user_attrs.get("refusals", 0)
+
+    # Compute capability preservation note
+    capability_note = "good" if kl_div < 1.0 else "moderate"
+
+    sections.append("| Metric | This Model | Original Model |")
+    sections.append("| :----- | :--------: | :------------: |")
+    sections.append(
+        f"| **KL Divergence** | {kl_div:.2f} *({capability_note})* | 0.00 *(baseline)* |"
+    )
+    sections.append(
+        f"| **Refusals** | {refusals}/{len(bad_prompts)} | {base_refusals}/{len(bad_prompts)} |"
+    )
+
+    # Refusal reduction percentage
+    if base_refusals > 0:
+        reduction_pct = ((base_refusals - refusals) / base_refusals) * 100
+        sections.append(
+            f"| **Refusal Reduction** | {reduction_pct:.1f}% | 0% *(baseline)* |"
         )
-    }
 
-## Performance
+    sections.append("")
 
-| Metric | This model | Original model ({model_link}) |
-| :----- | :--------: | :---------------------------: |
-| **KL divergence** | {trial.user_attrs["kl_divergence"]:.2f} | 0 *(by definition)* |
-| **Refusals** | {trial.user_attrs["refusals"]}/{len(bad_prompts)} | {base_refusals}/{
-        len(bad_prompts)
-    } |
+    # Usage examples (Feature 3)
+    if repo_id:
+        is_chat = any(kw in settings.model.lower() for kw in ["instruct", "chat"])
+
+        sections.append("## Usage\n")
+
+        if is_chat:
+            sections.append(
+                """### Using transformers
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model_id = \""""
+                + repo_id
+                + """\"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Hello, how are you?"},
+]
+inputs = tokenizer.apply_chat_template(messages, tokenize=True, return_tensors="pt")
+outputs = model.generate(inputs.to(model.device), max_new_tokens=512)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+```
+"""
+            )
+        else:
+            sections.append(
+                """### Using transformers
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model_id = \""""
+                + repo_id
+                + """\"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+
+inputs = tokenizer("Hello, how are you?", return_tensors="pt")
+outputs = model.generate(**inputs.to(model.device), max_new_tokens=512)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+```
+"""
+            )
+
+        sections.append(
+            """### Using vLLM
+
+```python
+from vllm import LLM, SamplingParams
+
+llm = LLM(model=\""""
+            + repo_id
+            + """\")
+params = SamplingParams(temperature=0.7, top_p=0.9, max_tokens=512)
+outputs = llm.generate(["Hello, how are you?"], params)
+print(outputs[0].outputs[0].text)
+```
+
+### Using Ollama
+
+```bash
+# Pull the model (if GGUF available)
+ollama pull """
+            + repo_id
+            + """
+
+# Or create from local GGUF
+cat > Modelfile <<EOF
+FROM ./"""
+            + repo_id.split("/")[-1]
+            + """.gguf
+EOF
+ollama create my-model -f Modelfile
+
+# Run
+ollama run my-model
+```
+
+## Recommended Settings
+
+This model has been abliterated (refusals removed). For best results:
+
+**Temperature:**
+- Creative writing: 0.9-1.2
+- Coding: 0.6-0.8
+- General use: 0.7-0.9
+
+**Sampling:**
+- top_p: 0.9-0.95
+- top_k: 40-50
+- repetition_penalty: 1.05-1.15
+
+**Context:**
+- Minimum: 2048 tokens
+- Recommended: 4096-8192 tokens
+
+**Abliteration Notes:**
+- Model responds more directly without moralizing
+- May need explicit direction for sensitive topics
+- Respects standard chat formatting and system prompts
+
+"""
+        )
+
+    # Abliteration parameters
+    sections.append("## Abliteration Parameters\n")
+    sections.append("| Parameter | Value |")
+    sections.append("| :-------- | :---: |")
+    for name, value in get_trial_parameters(trial).items():
+        sections.append(f"| **{name}** | {value} |")
+    sections.append("")
+
+    # Disclaimer
+    sections.append("""## Disclaimer
+
+This model has been modified to reduce refusals. It may generate content that would normally be filtered. Use responsibly and in compliance with applicable laws and regulations.
 
 -----
 
-"""
+""")
+
+    return "\n".join(sections)

@@ -1,0 +1,12 @@
+model = "Qwen/Qwen2.5-Coder-14B-Instruct"
+n_trials = 50
+auto_select = true
+auto_select_path = "models/Orchestrator-14B"
+cache_weights = true
+study_name = "orchestrator_study"
+
+[unhelpfulness_prompts]
+dataset = "allenai/c4"
+config = "en"
+split = "train[:200]"
+column = "text"

@@ -226,40 +226,31 @@ python scripts/validate_coding_model.py
 
 ---
 
-### Phase 2: Multi-Agent Prototype (Weeks 2-3)
+### Phase 2: Multi-Agent Prototype (Weeks 2-3) -- COMPLETED 2026-02-06
 
 **Goal:** 3 specialized 3B agents (frontend, backend, test)
 
-```bash
-# 1. Abliterate 3 specialized models
-bruno --model Qwen/Qwen2.5-Coder-3B --output models/Frontend
-bruno --model Qwen/Qwen2.5-Coder-3B --output models/Backend
-bruno --model Qwen/Qwen2.5-Coder-3B --output models/Test
+**Status: DONE** -- All 3 agents completed tasks successfully on RTX 4090 24GB via CrewAI.
 
-# 2. Install Codebuff SDK
-git clone https://github.com/codebuff/codebuff-sdk
-pip install codebuff-sdk
+**What was done:**
+1. Abliterated 3 Qwen2.5-Coder-3B-Instruct models with Bruno (Frontend, Backend, Test)
+2. Converted safetensors to GGUF via llama.cpp (Ollama's safetensors import is broken)
+3. Loaded models into Ollama on Vast.ai RTX 4090 instance
+4. Ran CrewAI 3-agent sequential crew
 
-# 3. Configure swarm
-cat > swarm_config.yaml <<EOF
-agents:
-  - name: frontend
-    model: ./models/Frontend
-    role: "Frontend React developer"
-  - name: backend
-    model: ./models/Backend
-    role: "Backend FastAPI developer"
-  - name: test
-    model: ./models/Test
-    role: "QA engineer writing tests"
-EOF
+**Results:**
+- Backend Developer: FastAPI auth API with JWT, OAuth2, Pydantic schemas -- **working code**
+- Frontend Developer: React login form with zod + Chakra UI validation -- **working code**
+- QA Engineer: Pytest test suite for auth endpoints -- **working code**
 
-# 4. Run test task
-codebuff swarm --config swarm_config.yaml \
-  --task "Build authentication API with React UI"
-```
+**Issues found:**
+- 3B models are repetitive (repeat code blocks multiple times in output)
+- Need `num_ctx 8192` (4096 too small for CrewAI's system prompts)
+- Need `timeout 600s` (300s causes timeouts)
+- Need `num_predict 2048` to cap output length
+- Ollama safetensors-to-GGUF conversion is broken; must convert with llama.cpp first
 
-**Hardware:** RTX 4090 24GB or cloud A6000 48GB
+**Hardware:** RTX 4090 24GB ($0.2672/hr on Vast.ai, instance 31014354)
 
 ---
 

@@ -257,6 +257,19 @@ class MoEAbliterationError(AbliterationError):
     pass
 
 
+class GateAbliterationError(AbliterationError):
+    """Exception raised during MoE gate abliteration.
+
+    Common causes:
+    - Gate weight modification failed
+    - Routing collapsed after gate ablation
+    - Gate output format not recognized during tracking
+    - Two-stage abliteration failed at gate stage
+    """
+
+    pass
+
+
 class ResidualExtractionError(AbliterationError):
     """Exception raised during residual/hidden state extraction.
 
@@ -382,6 +395,7 @@ HereticError (base)
     ├── CircuitAblationError
     ├── WeightModificationError
     ├── MoEAbliterationError
+    ├── GateAbliterationError
     ├── ResidualExtractionError
     └── ExtractionError
         ├── SupervisedProbeError

@@ -69,6 +69,42 @@ class Settings(BaseSettings):
         description="Make the uploaded HuggingFace repository private.",
     )
 
+    # GGUF conversion settings (Feature 4-5)
+    enable_gguf_conversion: bool = Field(
+        default=False,
+        description="Convert saved model to GGUF format after saving.",
+    )
+
+    gguf_quantizations: list[str] = Field(
+        default=["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"],
+        description="GGUF quantization types to generate. Common options: Q4_K_M, Q5_K_M, Q6_K, Q8_0, F16.",
+    )
+
+    gguf_output_dir: str = Field(
+        default="./models/gguf",
+        description="Directory to store GGUF files.",
+    )
+
+    gguf_upload: bool = Field(
+        default=False,
+        description="Upload GGUF files to a companion HuggingFace repo (adds -GGUF suffix).",
+    )
+
+    gguf_cleanup_f16: bool = Field(
+        default=True,
+        description="Delete intermediate F16 GGUF file after quantization to save disk space.",
+    )
+
+    gguf_imatrix: bool = Field(
+        default=False,
+        description="Use importance matrix for higher quality quantization (Feature 9).",
+    )
+
+    gguf_imatrix_dataset: str = Field(
+        default="wikitext",
+        description="Dataset for imatrix calibration. Options: 'wikitext', 'c4', or path to text file.",
+    )
+
     dtypes: list[str] = Field(
         default=[
             # In practice, "auto" almost always means bfloat16.
@@ -115,6 +151,12 @@ class Settings(BaseSettings):
     refusal_check_tokens: int = Field(
         default=30,
         description="Number of tokens to generate when checking for refusals. Refusals typically appear in the first 20-30 tokens, so generating fewer tokens speeds up evaluation significantly.",
+    )
+
+    residual_max_tokens: int = Field(
+        default=512,
+        description="Maximum input token length during residual extraction. Longer prompts are truncated. "
+        "Reduces GPU memory for models with many layers (e.g. 14B+ with output_hidden_states=True).",
     )
 
     kl_divergence_scale: float = Field(
@@ -433,6 +475,22 @@ class Settings(BaseSettings):
     mmlu_few_shot: int = Field(
         default=3,
         description="Number of few-shot examples to include in MMLU prompts.",
+    )
+
+    # Extended Benchmarks (Feature 6)
+    run_extended_benchmarks: bool = Field(
+        default=False,
+        description="Run extended benchmarks during validation (HellaSwag, ARC, GSM8K). Slower but provides comprehensive capability data.",
+    )
+
+    benchmark_suites: list[str] = Field(
+        default=["hellaswag", "arc_challenge", "gsm8k"],
+        description="Which extended benchmarks to run. Options: hellaswag, arc_challenge, gsm8k.",
+    )
+
+    benchmark_samples: int = Field(
+        default=100,
+        description="Number of samples per extended benchmark.",
     )
 
     save_validation_report: bool = Field(

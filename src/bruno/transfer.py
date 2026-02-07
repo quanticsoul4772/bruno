@@ -131,6 +131,7 @@ def detect_model_family(model_name: str) -> str | None:
         "gemma": ["gemma"],
         "phi": ["phi-", "phi2", "phi3", "phi-2", "phi-3"],
         "moonlight": ["moonlight", "moonshotai"],
+        "deepseek": ["deepseek", "deepseek-v3"],
     }
 
     for family, patterns in family_patterns.items():
