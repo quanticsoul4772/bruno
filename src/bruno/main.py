@@ -651,8 +651,8 @@ def run():
                 "PCA-based direction extraction",
             )
             logger.warning(
-                "Concept cone extraction failed, falling back to PCA",
-                error=str(e),
+                "Concept cone extraction failed, falling back to PCA: %s",
+                str(e),
             )
             concept_cone_result = None
 

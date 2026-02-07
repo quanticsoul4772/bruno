@@ -333,10 +333,9 @@ def extract_sacred_directions(
                 f"Orthogonalization will remove significant refusal signal.[/yellow]"
             )
             logger.warning(
-                "High sacred direction overlap detected",
-                mean_overlap=overlap_stats["mean_overlap"],
-                threshold=settings.sacred_overlap_threshold,
-                impact="Ablation effectiveness may be reduced",
+                "High sacred direction overlap detected: mean_overlap=%.3f, threshold=%.3f",
+                overlap_stats["mean_overlap"],
+                settings.sacred_overlap_threshold,
             )
 
         # Orthogonalize refusal direction against sacred directions

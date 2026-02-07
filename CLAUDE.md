@@ -118,8 +118,10 @@ Modular pipeline in `src/bruno/phases/`:
 - `get_layers()`: Handles text-only and multimodal architectures
 - `get_layer_matrices()`: Extracts abliterable weights (attn.o_proj, mlp.down_proj), supports dense and MoE
 - `abliterate()`: Orthogonalization with per-layer weight interpolation
-- `get_residuals_batched()`: Hidden state extraction for direction computation
+- `get_residuals_batched()`: Hidden state extraction with CPU offload and batch size capping
+- `generate()`: Supports `max_input_length` for selective input truncation
 - Phase 1-7 methods: PCA, supervised probes, ensemble, calibration, concept cones, CAA, circuits
+- GPU-accelerated probe training: batched PyTorch LBFGS (all layers simultaneously)
 - Layer-wise weight caching: selective caching of abliterable components only
 
 **`Evaluator` (`src/bruno/evaluator.py`)**
@@ -151,7 +153,7 @@ Modular pipeline in `src/bruno/phases/`:
 
 Priority: CLI > environment (`BRUNO_` prefix) > config.toml > defaults
 
-Key settings: `model`, `n_trials` (200), `batch_size` (0=auto), `dtypes`, `compile`, `storage`, `study_name`, `refusal_check_tokens` (30), `cache_weights` (true).
+Key settings: `model`, `n_trials` (200), `batch_size` (0=auto), `dtypes`, `compile`, `storage`, `study_name`, `refusal_check_tokens` (30), `cache_weights` (true), `residual_max_tokens` (512).
 
 Phase features (all enabled by default except `use_circuit_ablation`): neural refusal detection, ensemble probes, activation calibration, concept cones, CAA, MPOA, warm-start, validation.
 
@@ -220,6 +222,23 @@ Llama models are gated (require `HF_TOKEN`). Qwen models are not.
 
 ### GPU OOM on 32B+ Models
 Layer-wise caching (v1.2.0+) reduces cache memory by 55-75%. Works on H200 141GB (model 64GB + cache 28GB = 92GB). Does NOT fit on H100 80GB with caching -- use `--cache-weights false` on H100.
+
+### GPU OOM on 14B+ Models During Residual Extraction
+`output_hidden_states=True` stores O(n_layers * batch * seq_len * hidden_dim) memory. For 14B (50 layers, 5120 hidden_dim), this can be 33-67GB per batch with long inputs. Fixed by:
+- `residual_max_tokens` setting (default 512) truncates inputs during residual extraction
+- Residual batch size capped at min(batch_size, 16) regardless of auto-detected value
+- Immediate `del outputs` + `.clone()` to break tensor views + `.cpu()` offload between batches
+- Auto batch_size calibrates on `get_responses()` which does NOT use hidden states -- the auto-detected value is too high for `get_residuals()`. This is handled automatically now.
+
+### Probe Training Performance
+Supervised probe training uses GPU-accelerated batched PyTorch LBFGS when CUDA is available. Trains all layer probes simultaneously. For 14B (49 layers, 5120 hidden_dim): ~seconds on GPU vs ~40 minutes on CPU with sklearn. Falls back to sklearn + joblib on CPU-only systems.
+
+### SCP Through Vast.ai
+SCP can silently fail through Vast.ai's SSH proxy. Use pipe-through-SSH instead:
+```bash
+cat local_file.py | ssh -p PORT root@HOST "cat > /path/to/dest.py"
+```
+Verify with `grep -c 'pattern' /path/to/dest.py` after transfer.
 
 ### Circuit Ablation
 GQA models (Llama 3.x, Qwen2.5, Moonlight) are not compatible. Use `--use-circuit-ablation false`.

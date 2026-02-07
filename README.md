@@ -27,6 +27,9 @@ Bruno extracts behavioral direction vectors from model activations and removes t
 - Multi-Prompt Orthogonal Ablation (MPOA)
 - MoE architecture support with shared expert and router-aware targeting
 - GPU-accelerated PCA extraction
+- GPU-accelerated probe training (batched PyTorch LBFGS across all layers simultaneously)
+- Bounded residual extraction (`residual_max_tokens`) for 14B+ models
+- GGUF conversion via llama.cpp for Ollama deployment
 - Layer-wise weight caching
 - torch.compile() support
 - Early stopping for refusal detection
@@ -38,6 +41,7 @@ Bruno extracts behavioral direction vectors from model activations and removes t
 - Docker image for cloud deployment
 - Configuration verification (`bruno show-config`)
 - Custom exception hierarchy with actionable error messages
+- Multi-agent swarm support with CrewAI (see [examples/seven_agent_swarm.py](examples/seven_agent_swarm.py))
 
 ## Installation
 
@@ -89,10 +93,13 @@ See [configs/](configs/) for example configuration files. Use `bruno show-config
 
 | Size | GPU VRAM | Disk  | Notes |
 |------|----------|-------|-------|
-| 7B   | 24GB     | 100GB | |
-| 13B  | 24GB     | 150GB | |
+| 3B   | 8GB      | 50GB  | Specialist agents, fast abliteration |
+| 7B   | 24GB     | 100GB | General purpose |
+| 14B  | 80GB     | 150GB | Requires `residual_max_tokens=512` and batch size cap |
 | 32B  | 80GB+    | 200GB | C4 config required (`--unhelpfulness-prompts.config en`) |
 | 70B  | 140GB+   | 400GB | C4 config required |
+
+14B+ models generate ~33GB of hidden states during residual extraction (`output_hidden_states=True` stores all transformer layers). Bruno automatically caps residual batch size to 16 and truncates inputs to `residual_max_tokens` (default 512) to bound memory.
 
 ## Documentation
 
@@ -100,9 +107,41 @@ See [configs/](configs/) for example configuration files. Use `bruno show-config
 - [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) - Command cheatsheet
 - [LESSONS_LEARNED.md](LESSONS_LEARNED.md) - Troubleshooting
 - [ROADMAP.md](ROADMAP.md) - Future directions
+- [AI_AGENT_SWARM_RESEARCH.md](docs/AI_AGENT_SWARM_RESEARCH.md) - Multi-agent swarm architecture
+- [FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) - Feature status and plans
 - [experiments/](experiments/) - Custom behavioral directions
-- [examples/](examples/) - Example applications
+- [examples/](examples/) - Example applications and multi-agent swarm
 - [scripts/](scripts/) - Utility scripts
+
+## Multi-Agent Swarm
+
+Bruno can abliterate multiple specialist models that work together as a development team via CrewAI and Ollama. The architecture uses a 14B orchestrator directing 6x 3B specialists:
+
+| Agent | Model | Role |
+|-------|-------|------|
+| Orchestrator | Qwen2.5-Coder-14B | Task decomposition and coordination |
+| Frontend | Qwen2.5-Coder-3B | UI/UX implementation |
+| Backend | Qwen2.5-Coder-3B | API and server logic |
+| Test | Qwen2.5-Coder-3B | Testing and QA |
+| Security | Qwen2.5-Coder-3B | Security review and hardening |
+| Docs | Qwen2.5-Coder-3B | Documentation generation |
+| DevOps | Qwen2.5-Coder-3B | CI/CD and deployment |
+
+```bash
+# Convert abliterated models to GGUF for Ollama
+python -m llama_cpp.convert_hf_to_gguf models/Frontend-3B/ --outtype f16
+
+# Deploy to Ollama
+ollama create frontend-3b -f Modelfile.frontend
+
+# Run the swarm
+python examples/seven_agent_swarm.py --task "Build a REST API"
+
+# Flat mode (no orchestrator, 3B agents only)
+python examples/seven_agent_swarm.py --task "Build a REST API" --flat
+```
+
+See [docs/AI_AGENT_SWARM_RESEARCH.md](docs/AI_AGENT_SWARM_RESEARCH.md) for architecture details.
 
 ## Development
 
@@ -117,6 +156,8 @@ uv build
 ## Published Models
 
 - [rawcell/Moonlight-16B-A3B-Instruct-bruno](https://huggingface.co/rawcell/Moonlight-16B-A3B-Instruct-bruno) - MoE abliteration (MMLU 48.7%, HellaSwag 58.0%, GSM8K 55.0%)
+- [rawcell/Qwen2.5-Coder-7B-Instruct-bruno](https://huggingface.co/rawcell/Qwen2.5-Coder-7B-Instruct-bruno) - Code generation, abliterated
+- 6x Qwen2.5-Coder-3B specialist agents (Frontend, Backend, Test, Security, Docs, DevOps) - GGUF format for Ollama
 
 ## Resources
 
