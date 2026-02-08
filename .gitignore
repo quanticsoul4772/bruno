@@ -30,7 +30,14 @@ plots/
 *.json
 !pyproject.toml
 !package.json
-!config*.toml
+!configs/*.toml
+
+# Environment files
+.env
+.env.*
+
+# Windows artifacts
+nul
 
 # OS
 .DS_Store

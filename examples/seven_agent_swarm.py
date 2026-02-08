@@ -37,7 +37,7 @@ os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
 # Agent configurations: name -> (ollama_model, role, goal, backstory)
 AGENT_CONFIGS = {
     "orchestrator": {
-        "model": "orchestrator-agent",
+        "model": "orchestrator",
         "role": "Senior Software Architect",
         "goal": "Plan development tasks, design system architecture, and coordinate the team",
         "backstory": (
@@ -48,7 +48,7 @@ AGENT_CONFIGS = {
         "allow_delegation": True,
     },
     "frontend": {
-        "model": "frontend-agent",
+        "model": "frontend",
         "role": "Frontend Developer",
         "goal": "Build responsive, user-friendly React components with TypeScript",
         "backstory": (
@@ -58,7 +58,7 @@ AGENT_CONFIGS = {
         "allow_delegation": False,
     },
     "backend": {
-        "model": "backend-agent",
+        "model": "backend",
         "role": "Backend Developer",
         "goal": "Create scalable FastAPI endpoints and database schemas",
         "backstory": (
@@ -68,7 +68,7 @@ AGENT_CONFIGS = {
         "allow_delegation": False,
     },
     "test": {
-        "model": "test-agent",
+        "model": "test",
         "role": "QA Engineer",
         "goal": "Write comprehensive test suites with high coverage",
         "backstory": (
@@ -78,7 +78,7 @@ AGENT_CONFIGS = {
         "allow_delegation": False,
     },
     "security": {
-        "model": "security-agent",
+        "model": "security",
         "role": "Security Engineer",
         "goal": "Identify vulnerabilities and enforce secure coding practices",
         "backstory": (
@@ -89,7 +89,7 @@ AGENT_CONFIGS = {
         "allow_delegation": False,
     },
     "docs": {
-        "model": "docs-agent",
+        "model": "docs",
         "role": "Technical Writer",
         "goal": "Write clear API docs, README files, and developer guides",
         "backstory": (
@@ -100,7 +100,7 @@ AGENT_CONFIGS = {
         "allow_delegation": False,
     },
     "devops": {
-        "model": "devops-agent",
+        "model": "devops",
         "role": "DevOps Engineer",
         "goal": "Create Docker configs, CI/CD pipelines, and deployment scripts",
         "backstory": (
@@ -121,7 +121,7 @@ def create_llm(model_name: str, base_url: str) -> LLM:
     return LLM(
         model=f"ollama/{model_name}",
         base_url=base_url,
-        timeout=600,
+        timeout=1200,
         max_retries=3,
     )
 
@@ -136,7 +136,7 @@ def create_agent(name: str, base_url: str) -> Agent:
         llm=create_llm(config["model"], base_url),
         verbose=True,
         allow_delegation=config["allow_delegation"],
-        max_iter=3,
+        max_iter=10,
         max_retry_limit=3,
     )
 
@@ -159,7 +159,7 @@ def create_hierarchical_crew(
     # Create specialist agents
     agents = [create_agent(name, base_url) for name in agent_names]
 
-    # Single high-level task -- orchestrator breaks it down
+    # Single high-level task -- orchestrator delegates to specialists
     task = Task(
         description=(
             f"{task_description}\n\n"
@@ -167,12 +167,11 @@ def create_hierarchical_crew(
             "Each specialist should return ONLY code, no explanations. "
             "Review all outputs for quality and consistency before finalizing."
         ),
-        agent=manager,
         expected_output="Complete implementation with all components integrated",
     )
 
     return Crew(
-        agents=[manager] + agents,
+        agents=agents,
         tasks=[task],
         process=Process.hierarchical,
         manager_agent=manager,

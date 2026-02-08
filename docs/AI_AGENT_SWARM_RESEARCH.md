@@ -254,9 +254,34 @@ python scripts/validate_coding_model.py
 
 ---
 
-### Phase 3: Production Swarm (Weeks 4-6)
+### Phase 3: Production Swarm (Weeks 4-6) -- COMPLETED 2026-02-07
 
 **Goal:** 6-agent production team with orchestrator
+
+**Status: DONE** -- All 7 models abliterated, deployed to Ollama, swarm tested on A100 80GB.
+
+**What was done:**
+1. Abliterated 6x Qwen2.5-Coder-3B specialists (Frontend, Backend, Test, Security, Docs, DevOps)
+2. Abliterated 1x Qwen2.5-Coder-14B orchestrator (50 trials, best KL 0.47, 6% refusal reduction, MMLU 25.0%)
+3. Fixed 14B OOM: residual_max_tokens=512, tensor view cloning, CPU offload between batches, GPU probe training
+4. Converted all 7 models to GGUF via llama.cpp
+5. Deployed all 7 models to Ollama on A100 80GB
+6. Created CrewAI 7-agent swarm script (`examples/seven_agent_swarm.py`)
+7. Tested hierarchical mode (14B orchestrator delegates to 3B specialists) and flat mode (3B only)
+
+**Results:**
+- Hierarchical mode: Orchestrator (14B) successfully delegates to Backend Developer and Technical Writer
+- Flat mode: Backend + QA agents produce working FastAPI code and test suites
+- All 7 models fit in 80GB VRAM (29GB orchestrator + 6.2GB per specialist)
+- 14B orchestrator: 50 tok/s, 3B specialists: 146 tok/s
+
+**Issues found and fixed:**
+- 14B OOM during residual extraction: Fixed with 5 targeted memory optimizations in model.py
+- CrewAI delegation format: 14B model sometimes sends JSON array instead of single tool call
+- Model timeout: Increased from 600s to 1200s for model loading latency
+- Missing num_ctx/num_predict: Added `num_ctx 8192` + `num_predict 2048` to all Modelfiles
+- Ollama multi-model: Set OLLAMA_MAX_LOADED_MODELS=3, OLLAMA_KEEP_ALIVE=30m
+- CrewAI max_iter: Increased from 3 to 10 for orchestrator retry tolerance
 
 **Team Structure:**
 ```
@@ -272,70 +297,42 @@ swarm/
 
 **Framework:** CrewAI (production-ready)
 
-```python
-# swarm.py
-from crewai import Agent, Task, Crew
-from langchain.llms import Ollama
-
-# Load abliterated models
-agents = {
-    "orchestrator": Agent(
-        role="Project Manager",
-        llm=Ollama(model="models/Qwen2.5-14B-Orchestrator"),
-        goal="Plan and coordinate development"
-    ),
-    "frontend": Agent(
-        role="Frontend Developer",
-        llm=Ollama(model="models/Qwen2.5-3B-Frontend"),
-        tools=[ReactAnalyzer(), CSSValidator()]
-    ),
-    # ... other agents
-}
-
-crew = Crew(agents=list(agents.values()), verbose=True)
-```
-
-**Hardware:** A6000 48GB (Vast.ai ~$1/hour)
+**Hardware:** A100 80GB (Vast.ai ~$0.90/hour)
 
 ---
 
-### Phase 4: CLI Interface (Weeks 7-8)
+### Phase 4: CLI Interface (Weeks 7-8) -- COMPLETED 2026-02-07
 
 **Goal:** Production CLI like Claude Code/Codebuff
 
-```python
-# bruno-swarm CLI
-import click
-from swarm import crew
+**Status: DONE** -- `bruno-swarm` CLI implemented in `src/bruno/swarm.py` as a Click CLI with 3 subcommands.
+CrewAI is an optional dependency (`pip install bruno-ai[swarm]`). The `agents` and `status` subcommands
+work without CrewAI installed. Follows same patterns as `bruno-vast` CLI (Rich console, Panel output, logger).
 
-@click.command()
-@click.option('--task', help='Development task')
-@click.option('--agents', default='all', help='frontend,backend,test')
-@click.option('--interactive', is_flag=True)
-def swarm(task, agents, interactive):
-    """Run the Bruno AI developer swarm"""
-    if interactive:
-        # Interactive session like Claude Code
-        run_interactive_mode(crew)
-    else:
-        # One-shot task execution
-        result = crew.kickoff(inputs={'task': task})
-        print(result)
-
-if __name__ == '__main__':
-    swarm()
-```
+**Implementation:**
+- `src/bruno/swarm.py` -- Click CLI with lazy CrewAI imports
+- `pyproject.toml` -- `[project.optional-dependencies] swarm = ["crewai>=0.86.0"]`, `bruno-swarm` script entry
+- `examples/seven_agent_swarm.py` -- Preserved as standalone reference example
 
 **Usage:**
 ```bash
-# One-shot task
-bruno-swarm --task "Add user authentication to the app"
+# Install CrewAI
+pip install bruno-ai[swarm]   # or: uv sync --extra swarm
 
-# Interactive mode (like Claude Code)
-bruno-swarm --interactive
+# List agents (no CrewAI needed)
+bruno-swarm agents
 
-# Specific agents only
-bruno-swarm --task "Fix security vulnerabilities" --agents security,backend
+# Check Ollama connectivity and model availability (no CrewAI needed)
+bruno-swarm status
+
+# Run a task (hierarchical mode with orchestrator)
+bruno-swarm run --task "Build user authentication system"
+
+# Run in flat mode with specific agents
+bruno-swarm run --task "Fix SQL injection" --flat --agents security,backend
+
+# Save output to file
+bruno-swarm run --task "Build a REST API" --output result.md
 ```
 
 ---

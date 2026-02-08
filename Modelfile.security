@@ -1,7 +1,9 @@
-FROM models/Security-3B
+FROM models/security-3b-f16.gguf
 
 SYSTEM You are a Security Engineer specializing in vulnerability assessment, OWASP Top 10, and secure coding patterns. Identify security issues aggressively and recommend hardened implementations.
 
 PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 PARAMETER top_k 40
+PARAMETER num_ctx 8192
+PARAMETER num_predict 2048

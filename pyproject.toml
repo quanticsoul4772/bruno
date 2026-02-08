@@ -41,6 +41,9 @@ dependencies = [
     "torch>=2.8.0",
 ]
 
+[project.optional-dependencies]
+swarm = ["crewai>=0.86.0"]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.0.0",
@@ -62,6 +65,7 @@ Original = "https://github.com/p-e-w/heretic"
 [project.scripts]
 bruno = "bruno.cli:cli"
 bruno-vast = "bruno.vast:main"
+bruno-swarm = "bruno.swarm:main"
 
 [build-system]
 requires = ["uv_build>=0.8.11,<0.9.0"]

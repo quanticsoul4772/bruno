@@ -129,7 +129,7 @@ Bruno can abliterate multiple specialist models that work together as a developm
 
 ```bash
 # Convert abliterated models to GGUF for Ollama
-python -m llama_cpp.convert_hf_to_gguf models/Frontend-3B/ --outtype f16
+python tools/llama.cpp/convert_hf_to_gguf.py models/Frontend-3B/ --outtype f16
 
 # Deploy to Ollama
 ollama create frontend-3b -f Modelfile.frontend

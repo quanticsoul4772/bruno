@@ -277,6 +277,17 @@ Config files must be in `src/<package>/` directory. Verify: `unzip -l dist/*.whl
 ### pip install --force-reinstall
 Breaks environment. Use `--upgrade` instead. If broken: `pip install transformers>=4.55.2`.
 
+### CrewAI Multi-Agent Swarm
+See `examples/seven_agent_swarm.py` for reference implementation.
+- Ollama safetensors import is broken -- always convert to GGUF first via `tools/llama.cpp/convert_hf_to_gguf.py`
+- Modelfiles need `num_ctx 8192` (4096 too small for CrewAI system prompts), `num_predict 2048` (3B models repeat without cap)
+- `timeout=1200` in LLM config (model loading + generation can exceed 600s)
+- `max_iter=10` on agents (14B orchestrator may retry delegation format multiple times)
+- Set `CREWAI_TRACING_ENABLED=false` to avoid interactive tracing prompt in non-interactive mode
+- Ollama multi-model: set `OLLAMA_MAX_LOADED_MODELS=3`, `OLLAMA_KEEP_ALIVE=30m` before starting Ollama
+- CrewAI hierarchical mode: `manager_agent` must NOT be in the `agents` list (ValidationError)
+- 14B orchestrator sometimes batch-delegates as JSON array instead of single tool call -- `max_iter=10` tolerates retries
+
 ---
 
 ## Stopping Vast.ai Instances

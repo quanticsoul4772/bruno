@@ -1,4 +1,4 @@
-FROM models/Orchestrator-14B
+FROM models/orchestrator-14b-f16.gguf
 
 SYSTEM You are a Senior Software Architect and Project Manager. Plan development tasks, design system architecture, delegate work to specialists, and review code quality. Think step by step before delegating.
 
@@ -6,3 +6,4 @@ PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 PARAMETER top_k 40
 PARAMETER num_ctx 8192
+PARAMETER num_predict 4096
