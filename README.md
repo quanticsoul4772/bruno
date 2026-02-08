@@ -41,7 +41,7 @@ Bruno extracts behavioral direction vectors from model activations and removes t
 - Docker image for cloud deployment
 - Configuration verification (`bruno show-config`)
 - Custom exception hierarchy with actionable error messages
-- Multi-agent swarm support with CrewAI (see [examples/seven_agent_swarm.py](examples/seven_agent_swarm.py))
+
 
 ## Installation
 
@@ -107,41 +107,10 @@ See [configs/](configs/) for example configuration files. Use `bruno show-config
 - [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) - Command cheatsheet
 - [LESSONS_LEARNED.md](LESSONS_LEARNED.md) - Troubleshooting
 - [ROADMAP.md](ROADMAP.md) - Future directions
-- [AI_AGENT_SWARM_RESEARCH.md](docs/AI_AGENT_SWARM_RESEARCH.md) - Multi-agent swarm architecture
 - [FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) - Feature status and plans
 - [experiments/](experiments/) - Custom behavioral directions
-- [examples/](examples/) - Example applications and multi-agent swarm
+- [examples/](examples/) - Example applications
 - [scripts/](scripts/) - Utility scripts
-
-## Multi-Agent Swarm
-
-Bruno can abliterate multiple specialist models that work together as a development team via CrewAI and Ollama. The architecture uses a 14B orchestrator directing 6x 3B specialists:
-
-| Agent | Model | Role |
-|-------|-------|------|
-| Orchestrator | Qwen2.5-Coder-14B | Task decomposition and coordination |
-| Frontend | Qwen2.5-Coder-3B | UI/UX implementation |
-| Backend | Qwen2.5-Coder-3B | API and server logic |
-| Test | Qwen2.5-Coder-3B | Testing and QA |
-| Security | Qwen2.5-Coder-3B | Security review and hardening |
-| Docs | Qwen2.5-Coder-3B | Documentation generation |
-| DevOps | Qwen2.5-Coder-3B | CI/CD and deployment |
-
-```bash
-# Convert abliterated models to GGUF for Ollama
-python tools/llama.cpp/convert_hf_to_gguf.py models/Frontend-3B/ --outtype f16
-
-# Deploy to Ollama
-ollama create frontend-3b -f Modelfile.frontend
-
-# Run the swarm
-python examples/seven_agent_swarm.py --task "Build a REST API"
-
-# Flat mode (no orchestrator, 3B agents only)
-python examples/seven_agent_swarm.py --task "Build a REST API" --flat
-```
-
-See [docs/AI_AGENT_SWARM_RESEARCH.md](docs/AI_AGENT_SWARM_RESEARCH.md) for architecture details.
 
 ## Development
 

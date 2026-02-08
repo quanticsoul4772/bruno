@@ -1,5 +1,9 @@
 # AI Agent Swarm Research Report
 
+> **NOTE:** The swarm implementation has been separated into its own repository: `bruno-swarm`.
+> This document is kept as historical reference. For the production CLI, Modelfiles, and examples,
+> see the `bruno-swarm` project. Models are hosted at `rawcell/bruno-swarm-models` on HuggingFace.
+
 **Goal:** Build a CLI-based team of AI developers using abliterated coding models
 
 **Research Date:** February 4, 2026

@@ -194,34 +194,6 @@ class ValidationDefaults:
     NEURAL_DETECTION_THRESHOLD: float = 0.5
 
 
-@dataclass(frozen=True)
-class DirectionWeights:
-    """Default direction weights for multi-direction ablation."""
-
-    # Fixed weights for PCA components (when eigenvalue weights disabled)
-    DEFAULT_WEIGHTS: tuple[float, ...] = (1.0, 0.5, 0.25)
-
-    # Eigenvalue weight temperature for softmax
-    EIGENVALUE_TEMPERATURE: float = 1.0
-
-
-@dataclass(frozen=True)
-class RetryDefaults:
-    """Default values for retry logic."""
-
-    # Maximum delay between retries (seconds)
-    MAX_RETRY_DELAY: float = 60.0
-
-    # Base delay for exponential backoff
-    BASE_RETRY_DELAY: float = 1.0
-
-    # SSH connection timeout (seconds)
-    SSH_CONNECT_TIMEOUT: int = 30
-
-    # Command timeout (seconds)
-    COMMAND_TIMEOUT: int = 30
-
-
 # Singleton instances for easy import
 Thresholds = NumericalThresholds()
 LayerPos = LayerPositions()
@@ -231,8 +203,6 @@ Clustering = ClusteringDefaults()
 Circuit = CircuitDefaults()
 Memory = MemoryDefaults()
 Validation = ValidationDefaults()
-Weights = DirectionWeights()
-Retry = RetryDefaults()
 
 
 # For backward compatibility and direct imports

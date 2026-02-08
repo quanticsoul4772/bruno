@@ -22,11 +22,9 @@ from bruno.constants import (
     LayerPos,
     Memory,
     Probe,
-    Retry,
     # Singleton instances
     Thresholds,
     Validation,
-    Weights,
 )
 
 
@@ -207,39 +205,6 @@ class TestValidationDefaults:
     def test_neural_detection_threshold(self):
         """Test neural detection threshold is valid."""
         assert 0 <= Validation.NEURAL_DETECTION_THRESHOLD <= 1
-
-
-class TestDirectionWeights:
-    """Test DirectionWeights constants."""
-
-    def test_default_weights(self):
-        """Test default weights are valid."""
-        assert len(Weights.DEFAULT_WEIGHTS) > 0
-        assert all(w > 0 for w in Weights.DEFAULT_WEIGHTS)
-        # First weight should be 1.0
-        assert Weights.DEFAULT_WEIGHTS[0] == 1.0
-        # Weights should be decreasing
-        for i in range(1, len(Weights.DEFAULT_WEIGHTS)):
-            assert Weights.DEFAULT_WEIGHTS[i] <= Weights.DEFAULT_WEIGHTS[i - 1]
-
-    def test_eigenvalue_temperature(self):
-        """Test eigenvalue temperature is positive."""
-        assert Weights.EIGENVALUE_TEMPERATURE > 0
-
-
-class TestRetryDefaults:
-    """Test RetryDefaults constants."""
-
-    def test_delays(self):
-        """Test delay values are positive."""
-        assert Retry.MAX_RETRY_DELAY > 0
-        assert Retry.BASE_RETRY_DELAY > 0
-        assert Retry.BASE_RETRY_DELAY <= Retry.MAX_RETRY_DELAY
-
-    def test_timeouts(self):
-        """Test timeout values are positive."""
-        assert Retry.SSH_CONNECT_TIMEOUT > 0
-        assert Retry.COMMAND_TIMEOUT > 0
 
 
 class TestDirectExports:
