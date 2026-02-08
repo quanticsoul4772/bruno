@@ -30,6 +30,7 @@ from .constants import (
     EPSILON,
     NEAR_ZERO,
     SACRED_PCA_ALPHA,
+    Memory,
 )
 from .error_tracker import record_suppressed_error
 from .exceptions import (
@@ -50,6 +51,19 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from .evaluator import Evaluator
+
+
+def _should_clear_cache() -> bool:
+    """Check if GPU memory pressure warrants cache clearing."""
+    if not torch.cuda.is_available():
+        return False
+    try:
+        mem_frac = (
+            torch.cuda.memory_reserved() / torch.cuda.get_device_properties(0).total_mem
+        )
+        return mem_frac > Memory.GPU_CACHE_CLEAR_THRESHOLD_PCT / 100.0
+    except Exception:
+        return True  # Clear on error (safe default)
 
 
 @dataclass
@@ -701,6 +715,11 @@ class Model:
     def __init__(self, settings: Settings):
         self.settings = settings
 
+        # Performance caches (invalidated on disk-reload in reload_model)
+        self._cached_layers: ModuleList | None = None
+        self._tokenized_cache: dict[int, BatchEncoding] = {}
+        self._reload_validated: bool = False
+
         logger.info("Initializing model", model=settings.model)
         print()
         print(f"Loading model [bold]{settings.model}[/]...")
@@ -1123,136 +1142,98 @@ class Model:
             # Fast selective weight restoration (layer-wise)
             num_layers = len(self.get_layers())
 
-            # Validate cache matches current model structure
-            if len(self.layer_weights_cache) != num_layers:
-                raise ModelLoadError(
-                    f"Cache layer count mismatch: cache has {len(self.layer_weights_cache)} layers, "
-                    f"model has {num_layers} layers. Cache may be corrupted or from different model."
-                )
+            if not self._reload_validated:
+                # First reload: full validation to catch structural issues
+                if len(self.layer_weights_cache) != num_layers:
+                    raise ModelLoadError(
+                        f"Cache layer count mismatch: cache has {len(self.layer_weights_cache)} layers, "
+                        f"model has {num_layers} layers. Cache may be corrupted or from different model."
+                    )
 
-            with (
-                torch.no_grad()
-            ):  # Disable gradient tracking for in-place copy operations
-                for layer_idx in range(num_layers):
-                    # Verify layer exists in cache
-                    if layer_idx not in self.layer_weights_cache:
-                        raise ModelLoadError(
-                            f"Layer {layer_idx} missing from weight cache. "
-                            f"Cache may be corrupted. Available layers: {sorted(self.layer_weights_cache.keys())}"
-                        )
+                with (
+                    torch.no_grad()
+                ):  # Disable gradient tracking for in-place copy operations
+                    for layer_idx in range(num_layers):
+                        if layer_idx not in self.layer_weights_cache:
+                            raise ModelLoadError(
+                                f"Layer {layer_idx} missing from weight cache. "
+                                f"Cache may be corrupted. Available layers: {sorted(self.layer_weights_cache.keys())}"
+                            )
 
-                    try:
+                        try:
+                            current_matrices = self.get_layer_matrices(layer_idx)
+                            cached_layer = self.layer_weights_cache[layer_idx]
+                        except Exception as e:
+                            raise ModelLoadError(
+                                f"Failed to access layer {layer_idx} during cache restoration: {e}"
+                            ) from e
+
+                        for component, matrices in current_matrices.items():
+                            if component not in cached_layer:
+                                raise ModelLoadError(
+                                    f"Component '{component}' missing from layer {layer_idx} cache. "
+                                    f"Available components: {list(cached_layer.keys())}. "
+                                    f"Model architecture may have changed."
+                                )
+
+                            cached_matrices = cached_layer[component]
+
+                            if len(matrices) != len(cached_matrices):
+                                raise ModelLoadError(
+                                    f"Matrix count mismatch at layer {layer_idx}, component '{component}': "
+                                    f"model has {len(matrices)} matrices, cache has {len(cached_matrices)}. "
+                                    f"Model architecture may have changed (e.g., expert count in MoE)."
+                                )
+
+                            for matrix_idx, (matrix, cached) in enumerate(
+                                zip(matrices, cached_matrices)
+                            ):
+                                if matrix.shape != cached.shape:
+                                    raise ModelLoadError(
+                                        f"Shape mismatch at layer {layer_idx}, component '{component}', "
+                                        f"matrix {matrix_idx}: model shape {matrix.shape}, "
+                                        f"cache shape {cached.shape}. Model architecture may have changed."
+                                    )
+
+                                if matrix.dtype != cached.dtype:
+                                    logger.warning(
+                                        f"dtype mismatch at layer {layer_idx}, component '{component}', "
+                                        f"matrix {matrix_idx}: model dtype {matrix.dtype}, "
+                                        f"cache dtype {cached.dtype}. Converting cached tensor."
+                                    )
+                                    cached = cached.to(dtype=matrix.dtype)
+
+                                if matrix.device != cached.device:
+                                    logger.warning(
+                                        f"Device mismatch at layer {layer_idx}, component '{component}', "
+                                        f"matrix {matrix_idx}: model device {matrix.device}, "
+                                        f"cache device {cached.device}. Moving cached tensor."
+                                    )
+                                    cached = cached.to(device=matrix.device)
+
+                                try:
+                                    matrix.copy_(cached)
+                                except RuntimeError as e:
+                                    raise ModelLoadError(
+                                        f"Failed to restore weights at layer {layer_idx}, "
+                                        f"component '{component}', matrix {matrix_idx}: {e}"
+                                    ) from e
+
+                        self._restore_gate_weights(layer_idx, cached_layer)
+
+                self._reload_validated = True
+            else:
+                # Subsequent reloads: skip validation, just copy weights
+                with torch.no_grad():
+                    for layer_idx in range(num_layers):
                         current_matrices = self.get_layer_matrices(layer_idx)
                         cached_layer = self.layer_weights_cache[layer_idx]
-                    except Exception as e:
-                        raise ModelLoadError(
-                            f"Failed to access layer {layer_idx} during cache restoration: {e}"
-                        ) from e
-
-                    for component, matrices in current_matrices.items():
-                        # Verify component exists in cache
-                        if component not in cached_layer:
-                            raise ModelLoadError(
-                                f"Component '{component}' missing from layer {layer_idx} cache. "
-                                f"Available components: {list(cached_layer.keys())}. "
-                                f"Model architecture may have changed."
-                            )
-
-                        cached_matrices = cached_layer[component]
-
-                        # Verify matrix count matches
-                        if len(matrices) != len(cached_matrices):
-                            raise ModelLoadError(
-                                f"Matrix count mismatch at layer {layer_idx}, component '{component}': "
-                                f"model has {len(matrices)} matrices, cache has {len(cached_matrices)}. "
-                                f"Model architecture may have changed (e.g., expert count in MoE)."
-                            )
-
-                        # Restore each matrix from cache
-                        for matrix_idx, (matrix, cached) in enumerate(
-                            zip(matrices, cached_matrices)
-                        ):
-                            # Verify shapes match
-                            if matrix.shape != cached.shape:
-                                raise ModelLoadError(
-                                    f"Shape mismatch at layer {layer_idx}, component '{component}', "
-                                    f"matrix {matrix_idx}: model shape {matrix.shape}, "
-                                    f"cache shape {cached.shape}. Model architecture may have changed."
-                                )
-
-                            # Verify dtypes match
-                            if matrix.dtype != cached.dtype:
-                                logger.warning(
-                                    f"dtype mismatch at layer {layer_idx}, component '{component}', "
-                                    f"matrix {matrix_idx}: model dtype {matrix.dtype}, "
-                                    f"cache dtype {cached.dtype}. Converting cached tensor."
-                                )
-                                cached = cached.to(dtype=matrix.dtype)
-
-                            # Verify devices match
-                            if matrix.device != cached.device:
-                                logger.warning(
-                                    f"Device mismatch at layer {layer_idx}, component '{component}', "
-                                    f"matrix {matrix_idx}: model device {matrix.device}, "
-                                    f"cache device {cached.device}. Moving cached tensor."
-                                )
-                                cached = cached.to(device=matrix.device)
-
-                            # Perform restoration
-                            try:
+                        for component, matrices in current_matrices.items():
+                            cached_matrices = cached_layer[component]
+                            for matrix, cached in zip(matrices, cached_matrices):
                                 matrix.copy_(cached)
-                            except RuntimeError as e:
-                                raise ModelLoadError(
-                                    f"Failed to restore weights at layer {layer_idx}, "
-                                    f"component '{component}', matrix {matrix_idx}: {e}"
-                                ) from e
 
-                    # Restore gate weights for MoE models
-                    layer = self.get_layers()[layer_idx]
-                    if hasattr(layer.mlp, "gate"):
-                        gate = layer.mlp.gate
-
-                        # Restore gate weight
-                        if (
-                            "gate.weight" in cached_layer
-                            and hasattr(gate, "weight")
-                            and cached_layer["gate.weight"]
-                        ):
-                            cached_gate_weight = cached_layer["gate.weight"][0]
-                            if gate.weight.shape == cached_gate_weight.shape:
-                                if gate.weight.device != cached_gate_weight.device:
-                                    cached_gate_weight = cached_gate_weight.to(
-                                        device=gate.weight.device
-                                    )
-                                if gate.weight.dtype != cached_gate_weight.dtype:
-                                    cached_gate_weight = cached_gate_weight.to(
-                                        dtype=gate.weight.dtype
-                                    )
-                                gate.weight.copy_(cached_gate_weight)
-
-                        # Restore gate bias (e_score_correction)
-                        if (
-                            "gate.bias" in cached_layer
-                            and hasattr(gate, "e_score_correction")
-                            and cached_layer["gate.bias"]
-                        ):
-                            cached_gate_bias = cached_layer["gate.bias"][0]
-                            if gate.e_score_correction.shape == cached_gate_bias.shape:
-                                if (
-                                    gate.e_score_correction.device
-                                    != cached_gate_bias.device
-                                ):
-                                    cached_gate_bias = cached_gate_bias.to(
-                                        device=gate.e_score_correction.device
-                                    )
-                                if (
-                                    gate.e_score_correction.dtype
-                                    != cached_gate_bias.dtype
-                                ):
-                                    cached_gate_bias = cached_gate_bias.to(
-                                        dtype=gate.e_score_correction.dtype
-                                    )
-                                gate.e_score_correction.copy_(cached_gate_bias)
+                        self._restore_gate_weights(layer_idx, cached_layer)
         else:
             # Fallback: Reload from disk when caching disabled
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -1261,11 +1242,58 @@ class Model:
                 device_map=self.settings.device_map,
                 trust_remote_code=True,
             )
+            # Invalidate caches on full model reload
+            self._cached_layers = None
+            self._tokenized_cache.clear()
+            self._reload_validated = False
+
+    def _restore_gate_weights(
+        self, layer_idx: int, cached_layer: dict[str, list[Tensor]]
+    ) -> None:
+        """Restore MoE gate weights from cache for a single layer."""
+        layer = self.get_layers()[layer_idx]
+        if not hasattr(layer.mlp, "gate"):
+            return
+
+        gate = layer.mlp.gate
+
+        if (
+            "gate.weight" in cached_layer
+            and hasattr(gate, "weight")
+            and cached_layer["gate.weight"]
+        ):
+            cached_gate_weight = cached_layer["gate.weight"][0]
+            if gate.weight.shape == cached_gate_weight.shape:
+                if gate.weight.device != cached_gate_weight.device:
+                    cached_gate_weight = cached_gate_weight.to(
+                        device=gate.weight.device
+                    )
+                if gate.weight.dtype != cached_gate_weight.dtype:
+                    cached_gate_weight = cached_gate_weight.to(dtype=gate.weight.dtype)
+                gate.weight.copy_(cached_gate_weight)
+
+        if (
+            "gate.bias" in cached_layer
+            and hasattr(gate, "e_score_correction")
+            and cached_layer["gate.bias"]
+        ):
+            cached_gate_bias = cached_layer["gate.bias"][0]
+            if gate.e_score_correction.shape == cached_gate_bias.shape:
+                if gate.e_score_correction.device != cached_gate_bias.device:
+                    cached_gate_bias = cached_gate_bias.to(
+                        device=gate.e_score_correction.device
+                    )
+                if gate.e_score_correction.dtype != cached_gate_bias.dtype:
+                    cached_gate_bias = cached_gate_bias.to(
+                        dtype=gate.e_score_correction.dtype
+                    )
+                gate.e_score_correction.copy_(cached_gate_bias)
 
     def get_layers(self) -> ModuleList:
         """Get the transformer layers from the model.
 
         Tries multimodal model structure first, then falls back to text-only.
+        Caches the result since layer structure is immutable after model load.
 
         Returns:
             ModuleList of transformer layers
@@ -1273,15 +1301,20 @@ class Model:
         Raises:
             ModelInferenceError: If layers cannot be accessed from model
         """
+        if self._cached_layers is not None:
+            return self._cached_layers
+
         # Most multimodal models.
         try:
-            return self.model.model.language_model.layers
+            self._cached_layers = self.model.model.language_model.layers
+            return self._cached_layers
         except (AttributeError, TypeError):
             pass
 
         # Text-only models.
         try:
-            return self.model.model.layers
+            self._cached_layers = self.model.model.layers
+            return self._cached_layers
         except (AttributeError, TypeError) as e:
             raise ModelInferenceError(
                 f"Cannot access transformer layers from model. "
@@ -1694,8 +1727,10 @@ class Model:
                             # Standard abliteration: in-place subtraction
                             matrix.sub_(weight * (device_projector @ matrix))
 
-                        # Verify no NaN/Inf introduced
-                        if torch.isnan(matrix).any() or torch.isinf(matrix).any():
+                        # Verify no NaN/Inf introduced (skippable for performance)
+                        if self.settings.validate_abliteration and (
+                            torch.isnan(matrix).any() or torch.isinf(matrix).any()
+                        ):
                             record_suppressed_error(
                                 error=None,
                                 context="abliterate_nan_inf_detected",
@@ -1759,7 +1794,8 @@ class Model:
 
             # Clear CUDA cache periodically to prevent memory fragmentation
             if layer_index % CACHE_CLEAR_INTERVAL == (CACHE_CLEAR_INTERVAL - 1):
-                empty_cache()
+                if _should_clear_cache():
+                    empty_cache()
 
         # Clear the device projector cache to prevent memory leaks
         device_projectors_cache.clear()
@@ -1913,13 +1949,60 @@ class Model:
             do_sample=False,  # Use greedy decoding to ensure deterministic outputs.
         )
 
+    def _get_prompt_cache_key(
+        self, prompts: list[str], max_input_length: int | None
+    ) -> int:
+        return hash((tuple(prompts), max_input_length))
+
+    def generate_cached(
+        self,
+        prompts: list[str],
+        max_input_length: int | None = None,
+        **kwargs: Any,
+    ) -> tuple[BatchEncoding, GenerateOutput | LongTensor]:
+        """Like generate(), but caches tokenization for repeated prompt sets.
+
+        Tokenization (apply_chat_template + tokenizer) is deterministic for the
+        same prompts, so we cache the result and reuse it across trials.
+        """
+        cache_key = self._get_prompt_cache_key(prompts, max_input_length)
+
+        if cache_key in self._tokenized_cache:
+            inputs = self._tokenized_cache[cache_key].to(self.model.device)
+        else:
+            chats = [self.get_chat(prompt) for prompt in prompts]
+            chat_prompts: list[str] = self.tokenizer.apply_chat_template(
+                chats,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+            tokenizer_kwargs: dict[str, Any] = {
+                "return_tensors": "pt",
+                "padding": True,
+                "return_token_type_ids": False,
+            }
+            if max_input_length is not None:
+                tokenizer_kwargs["truncation"] = True
+                tokenizer_kwargs["max_length"] = max_input_length
+            inputs = self.tokenizer(chat_prompts, **tokenizer_kwargs)
+            # Store on CPU to avoid holding GPU memory between trials
+            self._tokenized_cache[cache_key] = inputs.to("cpu")
+            inputs = inputs.to(self.model.device)
+
+        return inputs, self.model.generate(
+            **inputs,
+            **kwargs,
+            pad_token_id=self.tokenizer.eos_token_id,
+            do_sample=False,
+        )
+
     def get_responses(
         self, prompts: list[str], max_tokens: int | None = None
     ) -> list[str]:
         if max_tokens is None:
             max_tokens = self.settings.max_response_length
 
-        inputs, outputs = self.generate(
+        inputs, outputs = self.generate_cached(
             prompts,
             max_new_tokens=max_tokens,
         )
@@ -2153,7 +2236,7 @@ class Model:
             Tensor of shape (n_prompts, vocab_size) if n_tokens=1,
             or (n_prompts, n_tokens, vocab_size) if n_tokens>1
         """
-        _, outputs = self.generate(
+        _, outputs = self.generate_cached(
             prompts,
             max_new_tokens=n_tokens,
             output_scores=True,
@@ -3975,8 +4058,10 @@ class Model:
                     )
                     stats["addition_layers_processed"] += 1
 
-                    # Verify no NaN/Inf introduced
-                    if torch.isnan(o_proj.data).any() or torch.isinf(o_proj.data).any():
+                    # Verify no NaN/Inf introduced (skippable for performance)
+                    if self.settings.validate_abliteration and (
+                        torch.isnan(o_proj.data).any() or torch.isinf(o_proj.data).any()
+                    ):
                         record_suppressed_error(
                             error=None,
                             context="abliterate_with_caa_nan_result",
@@ -4009,7 +4094,8 @@ class Model:
 
                 # Clean up periodically
                 if layer_idx % CACHE_CLEAR_INTERVAL == (CACHE_CLEAR_INTERVAL - 1):
-                    empty_cache()
+                    if _should_clear_cache():
+                        empty_cache()
 
         # Log summary
         if stats["errors_suppressed"] > 0:
@@ -5296,7 +5382,8 @@ class Model:
 
             # Periodic cache clear
             if layer_idx % CACHE_CLEAR_INTERVAL == (CACHE_CLEAR_INTERVAL - 1):
-                empty_cache()
+                if _should_clear_cache():
+                    empty_cache()
 
         device_projectors_cache.clear()
 

@@ -220,6 +220,7 @@ class TestModelGetLayers:
         from bruno.model import Model
 
         mock_model = MagicMock()
+        mock_model._cached_layers = None
         mock_layers = [MagicMock() for _ in range(32)]
 
         # Simulate text-only model: language_model.layers doesn't exist (raises exception)
@@ -236,6 +237,7 @@ class TestModelGetLayers:
         from bruno.model import Model
 
         mock_model = MagicMock()
+        mock_model._cached_layers = None
         mock_layers = [MagicMock() for _ in range(24)]
         mock_model.model.model.language_model.layers = mock_layers
 
@@ -592,7 +594,7 @@ class TestModelResponses:
         # Mock generate to return input_ids and generated output
         mock_inputs = {"input_ids": torch.tensor([[1, 2, 3, 4, 5]])}
         mock_outputs = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]])
-        mock_model.generate = MagicMock(return_value=(mock_inputs, mock_outputs))
+        mock_model.generate_cached = MagicMock(return_value=(mock_inputs, mock_outputs))
 
         mock_model.tokenizer.batch_decode = MagicMock(
             return_value=["Generated response text"]
@@ -618,14 +620,14 @@ class TestModelResponses:
 
         mock_inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
         mock_outputs = torch.tensor([[1, 2, 3, 4, 5]])
-        mock_model.generate = MagicMock(return_value=(mock_inputs, mock_outputs))
+        mock_model.generate_cached = MagicMock(return_value=(mock_inputs, mock_outputs))
         mock_model.tokenizer.batch_decode = MagicMock(return_value=["Response"])
 
         # Call with custom max_tokens
         Model.get_responses(mock_model, ["Test"], max_tokens=30)
 
-        # Verify generate was called with custom max_new_tokens
-        call_kwargs = mock_model.generate.call_args[1]
+        # Verify generate_cached was called with custom max_new_tokens
+        call_kwargs = mock_model.generate_cached.call_args[1]
         assert call_kwargs["max_new_tokens"] == 30
 
     def test_get_responses_batched_processes_in_batches(self):
@@ -671,12 +673,12 @@ class TestModelLogprobs:
 
         mock_model = MagicMock()
 
-        # Mock generate to return logits in scores
+        # Mock generate_cached to return logits in scores
         mock_inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
         mock_logits = torch.randn(2, 32000)  # 2 prompts, 32000 vocab
         mock_outputs = MagicMock()
         mock_outputs.scores = [mock_logits]  # First (only) generated token
-        mock_model.generate = MagicMock(return_value=(mock_inputs, mock_outputs))
+        mock_model.generate_cached = MagicMock(return_value=(mock_inputs, mock_outputs))
 
         logprobs = Model.get_logprobs(mock_model, ["Prompt 1", "Prompt 2"])
 
@@ -1355,7 +1357,7 @@ class TestModelMultiTokenLogprobs:
         mock_outputs = MagicMock()
         mock_outputs.scores = [mock_logits]
         mock_inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
-        mock_model.generate.return_value = (mock_inputs, mock_outputs)
+        mock_model.generate_cached.return_value = (mock_inputs, mock_outputs)
 
         logprobs = Model.get_logprobs(mock_model, ["P1", "P2"], n_tokens=1)
 
@@ -1376,7 +1378,7 @@ class TestModelMultiTokenLogprobs:
             torch.randn(2, 32000),
         ]
         mock_inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
-        mock_model.generate.return_value = (mock_inputs, mock_outputs)
+        mock_model.generate_cached.return_value = (mock_inputs, mock_outputs)
 
         logprobs = Model.get_logprobs(mock_model, ["P1", "P2"], n_tokens=3)
 

@@ -133,6 +133,12 @@ class Settings(BaseSettings):
         description="Cache original model weights in memory for fast reset between trials. Disable for very large models (>30B) that don't fit in memory twice.",
     )
 
+    validate_abliteration: bool = Field(
+        default=True,
+        description="Validate weight matrices for NaN/Inf after abliteration. "
+        "Disable for ~5-10% speedup on large models if numerical stability is not a concern.",
+    )
+
     batch_size: int = Field(
         default=0,  # auto
         description="Number of input sequences to process in parallel (0 = auto).",

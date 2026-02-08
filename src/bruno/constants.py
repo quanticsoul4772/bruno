@@ -171,6 +171,9 @@ class MemoryDefaults:
     # TorchDynamo cache size limit
     DYNAMO_CACHE_SIZE_LIMIT: int = 64
 
+    # Only clear GPU cache if reserved memory exceeds this percentage of total
+    GPU_CACHE_CLEAR_THRESHOLD_PCT: int = 85
+
 
 @dataclass(frozen=True)
 class ValidationDefaults:
