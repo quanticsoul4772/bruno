@@ -286,17 +286,210 @@ def create_flat_crew(
     )
 
 
+def _run_interactive(ollama_url: str, flat: bool, agent_names: list[str] | None):
+    """Interactive TUI mode -- like Claude Code.
+
+    Presents a prompt loop where the user types tasks and sees results.
+    Supports task history, agent selection, and mode switching.
+    """
+    from datetime import datetime
+
+    from rich.prompt import Prompt
+
+    _check_crewai()
+
+    # Disable CrewAI tracing
+    os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
+
+    mode = "flat" if flat else "hierarchical"
+    agents_str = ", ".join(agent_names) if agent_names else "all specialists"
+    history: list[dict] = []
+
+    # Welcome banner
+    console.print()
+    console.print(
+        Panel(
+            "[bold]Bruno AI Developer Swarm[/]\n\n"
+            "Interactive mode -- type a task and the swarm will execute it.\n\n"
+            "Commands:\n"
+            "  [cyan]/agents[/]          -- list available agents\n"
+            "  [cyan]/status[/]          -- check Ollama and model status\n"
+            "  [cyan]/mode flat[/]       -- switch to flat mode\n"
+            "  [cyan]/mode hierarchical[/] -- switch to hierarchical mode\n"
+            "  [cyan]/use agent1,agent2[/] -- select specific agents\n"
+            "  [cyan]/use all[/]         -- use all specialists\n"
+            "  [cyan]/history[/]         -- show task history\n"
+            "  [cyan]/save <file>[/]     -- save last result to file\n"
+            "  [cyan]/quit[/]            -- exit\n\n"
+            f"Mode: [cyan]{mode}[/]  |  Agents: [cyan]{agents_str}[/]  |  Ollama: [cyan]{ollama_url}[/]",
+            title="Swarm",
+            border_style="cyan",
+        )
+    )
+    console.print()
+
+    last_result = None
+
+    while True:
+        try:
+            # Prompt
+            mode_label = "[dim]flat[/]" if flat else "[dim]hier[/]"
+            task_input = Prompt.ask(f"[bold cyan]swarm[/] {mode_label}")
+
+            if not task_input.strip():
+                continue
+
+            task_input = task_input.strip()
+
+            # Handle commands
+            if task_input.startswith("/"):
+                cmd_parts = task_input.split(None, 1)
+                cmd = cmd_parts[0].lower()
+                cmd_arg = cmd_parts[1] if len(cmd_parts) > 1 else ""
+
+                if cmd in ("/quit", "/exit", "/q"):
+                    console.print("[dim]Goodbye.[/]")
+                    break
+
+                elif cmd == "/agents":
+                    list_agents.invoke(click.Context(list_agents))
+                    continue
+
+                elif cmd == "/status":
+                    ctx = click.Context(check_status)
+                    ctx.params = {"ollama_url": ollama_url}
+                    check_status.invoke(ctx)
+                    continue
+
+                elif cmd == "/mode":
+                    if cmd_arg.lower() == "flat":
+                        flat = True
+                        console.print("[green]Switched to flat mode[/]")
+                    elif cmd_arg.lower() in ("hierarchical", "hier"):
+                        flat = False
+                        console.print("[green]Switched to hierarchical mode[/]")
+                    else:
+                        console.print(
+                            "[yellow]Usage: /mode flat  or  /mode hierarchical[/]"
+                        )
+                    continue
+
+                elif cmd == "/use":
+                    if cmd_arg.lower() == "all":
+                        agent_names = None
+                        console.print("[green]Using all specialists[/]")
+                    else:
+                        parsed = _parse_agents(cmd_arg)
+                        if parsed:
+                            agent_names = parsed
+                            console.print(
+                                f"[green]Using agents: {', '.join(agent_names)}[/]"
+                            )
+                    continue
+
+                elif cmd == "/history":
+                    if not history:
+                        console.print("[dim]No tasks yet.[/]")
+                    else:
+                        for i, entry in enumerate(history, 1):
+                            status = (
+                                "[green]OK[/]" if entry["success"] else "[red]FAILED[/]"
+                            )
+                            console.print(
+                                f"  {i}. [{entry['time']}] {status} "
+                                f"[dim]({entry['mode']})[/] {entry['task']}"
+                            )
+                    continue
+
+                elif cmd == "/save":
+                    if not last_result:
+                        console.print("[yellow]No result to save.[/]")
+                    elif not cmd_arg:
+                        console.print("[yellow]Usage: /save <filename>[/]")
+                    else:
+                        save_path = Path(cmd_arg)
+                        save_path.parent.mkdir(parents=True, exist_ok=True)
+                        save_path.write_text(str(last_result), encoding="utf-8")
+                        console.print(f"[green]Saved to {save_path}[/]")
+                    continue
+
+                else:
+                    console.print(f"[yellow]Unknown command: {cmd}[/]")
+                    continue
+
+            # Execute task
+            mode_str = "flat" if flat else "hierarchical"
+            current_agents = (
+                ", ".join(agent_names) if agent_names else "all specialists"
+            )
+            console.print()
+            console.print(f"[dim]Running ({mode_str}, {current_agents})...[/]")
+            console.print()
+
+            try:
+                if flat:
+                    crew = create_flat_crew(task_input, ollama_url, agent_names)
+                else:
+                    crew = create_hierarchical_crew(task_input, ollama_url, agent_names)
+
+                result = crew.kickoff()
+                last_result = result
+
+                console.print()
+                console.print(
+                    Panel(
+                        str(result),
+                        title="[bold green]Result[/]",
+                        border_style="green",
+                    )
+                )
+
+                history.append(
+                    {
+                        "task": task_input,
+                        "mode": mode_str,
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "success": True,
+                    }
+                )
+
+            except Exception as e:
+                logger.error("Swarm execution failed", exc_info=True)
+                console.print(f"\n[red]Failed: {type(e).__name__}: {e}[/]")
+                history.append(
+                    {
+                        "task": task_input,
+                        "mode": mode_str,
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "success": False,
+                    }
+                )
+
+            console.print()
+
+        except KeyboardInterrupt:
+            console.print("\n[dim]Ctrl+C -- type /quit to exit[/]")
+            continue
+        except EOFError:
+            console.print("\n[dim]Goodbye.[/]")
+            break
+
+
 # CLI Commands
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
     """Bruno AI Developer Swarm CLI.
 
     Multi-agent development team powered by abliterated Bruno models.
     Uses CrewAI for orchestration and Ollama for local inference.
 
+    Run without a subcommand to enter interactive mode.
+
     Install CrewAI: pip install bruno-ai[swarm]
     """
-    pass
+    if ctx.invoked_subcommand is None:
+        _run_interactive(DEFAULT_OLLAMA_URL, flat=False, agent_names=None)
 
 
 @cli.command("run")
