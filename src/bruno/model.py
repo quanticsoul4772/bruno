@@ -936,7 +936,7 @@ class Model:
                 dense_count = len(self.get_layer_matrices(0).get("mlp.down_proj", []))
                 has_shared = hasattr(
                     self.get_layers()[moe_layer_idx].mlp, "shared_experts"
-                )
+                ) or hasattr(self.get_layers()[moe_layer_idx].mlp, "shared_expert")
                 shared_info = " + shared_experts" if has_shared else ""
                 print(
                     f"  * [bold]{component}[/]: MoE - "
@@ -1321,6 +1321,28 @@ class Model:
                 f"Model architecture may be unsupported. Error: {e}"
             ) from e
 
+    def _get_attn_o_proj(self, layer: Any) -> Tensor:
+        """Get attention output projection weight, handling architecture variants.
+
+        Supports:
+        - Standard attention: layer.self_attn.o_proj.weight
+        - Linear attention (Qwen3-Coder-Next): layer.linear_attn.out_proj.weight
+        """
+        # Standard attention (most models)
+        try:
+            return layer.self_attn.o_proj.weight
+        except (AttributeError, TypeError):
+            pass
+        # Linear attention (Qwen3-Coder-Next GatedDeltaNet)
+        try:
+            return layer.linear_attn.out_proj.weight
+        except (AttributeError, TypeError):
+            pass
+        raise ModelInferenceError(
+            "Cannot find attention output projection. "
+            "Tried: layer.self_attn.o_proj.weight, layer.linear_attn.out_proj.weight"
+        )
+
     def get_layer_matrices(self, layer_index: int) -> dict[str, list[Tensor]]:
         """Get abliterable weight matrices from a specific layer.
 
@@ -1351,7 +1373,9 @@ class Model:
 
         # Attention output projection - required for all models
         try:
-            try_add("attn.o_proj", layer.self_attn.o_proj.weight)
+            try_add("attn.o_proj", self._get_attn_o_proj(layer))
+        except ModelInferenceError:
+            raise
         except (AttributeError, TypeError) as e:
             raise ModelInferenceError(
                 f"Cannot access attention output projection (attn.o_proj) at layer {layer_index}. "
@@ -1409,24 +1433,36 @@ class Model:
         except (AttributeError, TypeError):
             pass  # Not this architecture
 
-        # DeepSeekV3/Moonlight shared experts (always active for every token).
+        # DeepSeekV3/Moonlight/Qwen3-Coder-Next shared experts (always active for every token).
         # These are critical for MoE abliteration since they process ALL tokens.
+        # Try both shared_experts (DeepSeek/Moonlight) and shared_expert (Qwen3-Coder-Next)
         if self.settings.use_moe_shared_experts:
+            shared = None
             try:
-                if try_add("mlp.down_proj", layer.mlp.shared_experts.down_proj.weight):
-                    mlp_found = True
-            except (AttributeError, TypeError) as e:
-                # Log but don't fail - shared experts are optional enhancement
-                record_suppressed_error(
-                    error=e,
-                    context="get_layer_matrices_shared_experts",
-                    module="model",
-                    severity="info",
-                    details={
-                        "layer_index": layer_index,
-                        "reason": "Shared experts not found, may not be DeepSeekV3/Moonlight",
-                    },
-                )
+                shared = layer.mlp.shared_experts
+            except (AttributeError, TypeError):
+                pass
+            if shared is None:
+                try:
+                    shared = layer.mlp.shared_expert
+                except (AttributeError, TypeError):
+                    pass
+            if shared is not None:
+                try:
+                    if try_add("mlp.down_proj", shared.down_proj.weight):
+                        mlp_found = True
+                except (AttributeError, TypeError) as e:
+                    # Log but don't fail - shared experts are optional enhancement
+                    record_suppressed_error(
+                        error=e,
+                        context="get_layer_matrices_shared_experts",
+                        module="model",
+                        severity="info",
+                        details={
+                            "layer_index": layer_index,
+                            "reason": "Shared experts found but no down_proj attribute",
+                        },
+                    )
 
         # We need at least one MLP down-projection.
         if (
@@ -1437,7 +1473,7 @@ class Model:
             raise ModelInferenceError(
                 f"No MLP down-projection weights found at layer {layer_index}. "
                 f"Model architecture may be unsupported. "
-                f"Tried: dense MLP, Qwen3 MoE, Phi-3.5 MoE, gpt-oss MoE, Granite MoE."
+                f"Tried: dense MLP, Qwen3 MoE, Phi-3.5 MoE, gpt-oss MoE, Granite MoE, Qwen3-Coder-Next."
             )
 
         return matrices
@@ -4048,7 +4084,7 @@ class Model:
 
                     # Add to attention output projection
                     # This encourages the model to produce compliance-like activations
-                    o_proj = layer.self_attn.o_proj.weight
+                    o_proj = self._get_attn_o_proj(layer)
                     device_projector = projector.to(o_proj.device)
 
                     # In-place addition: W += strength * (projector @ W)
@@ -4242,7 +4278,7 @@ class Model:
 
         for layer_idx in range(num_layers):
             layer = self.get_layers()[layer_idx]
-            o_proj = layer.self_attn.o_proj.weight
+            o_proj = self._get_attn_o_proj(layer)
 
             hidden_dim = o_proj.shape[0]
             head_dim = hidden_dim // n_heads
@@ -4378,7 +4414,7 @@ class Model:
                 continue
 
             layer = self.get_layers()[circuit.layer_idx]
-            o_proj = layer.self_attn.o_proj.weight
+            o_proj = self._get_attn_o_proj(layer)
 
             hidden_dim = o_proj.shape[0]
             head_dim = hidden_dim // n_heads
@@ -4719,7 +4755,11 @@ class Model:
         for layer_idx in range(min(3, len(self.get_layers()))):
             layer = self.get_layers()[layer_idx]
             # Check for various MoE patterns
-            if hasattr(layer.mlp, "experts") or hasattr(layer.mlp, "shared_experts"):
+            if (
+                hasattr(layer.mlp, "experts")
+                or hasattr(layer.mlp, "shared_experts")
+                or hasattr(layer.mlp, "shared_expert")
+            ):
                 return True
             if hasattr(layer, "block_sparse_moe"):
                 return True
@@ -4741,18 +4781,27 @@ class Model:
 
         layer = self.get_layers()[layer_idx]
 
-        # DeepSeekV3/Moonlight pattern
+        # DeepSeekV3/Moonlight/Qwen3-Coder-Next pattern (gate with attributes)
         if hasattr(layer.mlp, "gate"):
             gate = layer.mlp.gate
-            n_experts = getattr(gate, "n_routed_experts", None)
-            top_k = getattr(gate, "top_k", None)
+            n_experts = getattr(gate, "n_routed_experts", None) or getattr(
+                gate, "num_experts", None
+            )
+            top_k = getattr(gate, "top_k", None) or getattr(
+                gate, "num_experts_per_tok", None
+            )
             if n_experts is not None and top_k is not None:
                 return (n_experts, top_k)
 
-        # Mixtral/general pattern
+        # Mixtral/general pattern (iterable experts)
         if hasattr(layer.mlp, "experts"):
-            n_experts = len(layer.mlp.experts)
-            # Default top_k is usually 2 for Mixtral-style
+            try:
+                n_experts = len(layer.mlp.experts)
+            except TypeError:
+                # Non-iterable experts (3D parameter storage) - check config
+                n_experts = getattr(layer.mlp, "num_experts", None)
+                if n_experts is None:
+                    return None
             top_k = getattr(layer.mlp, "num_experts_per_tok", 2)
             return (n_experts, top_k)
 
@@ -5187,7 +5236,7 @@ class Model:
 
                     # Always abliterate attention (all tokens pass through)
                     try:
-                        o_proj = layer.self_attn.o_proj.weight
+                        o_proj = self._get_attn_o_proj(layer)
                         device_projector = get_device_projector(
                             projector, o_proj.device
                         )
@@ -5304,10 +5353,10 @@ class Model:
                                 stats["experts_skipped"] += 1
 
                     # Always abliterate shared experts (always active)
-                    if self.settings.use_moe_shared_experts and hasattr(
-                        layer.mlp, "shared_experts"
-                    ):
-                        shared = layer.mlp.shared_experts
+                    shared = getattr(layer.mlp, "shared_experts", None) or getattr(
+                        layer.mlp, "shared_expert", None
+                    )
+                    if self.settings.use_moe_shared_experts and shared is not None:
                         if hasattr(shared, "down_proj"):
                             try:
                                 down_proj = shared.down_proj.weight

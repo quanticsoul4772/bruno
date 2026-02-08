@@ -261,6 +261,9 @@ class TestModelGetLayerMatrices:
         # Mock get_layers to return our test layer
         mock_model = MagicMock()
         mock_model.get_layers = MagicMock(return_value=[mock_layer])
+        mock_model._get_attn_o_proj = lambda layer: Model._get_attn_o_proj(
+            mock_model, layer
+        )
 
         matrices = Model.get_layer_matrices(mock_model, 0)
 
@@ -288,6 +291,9 @@ class TestModelGetLayerMatrices:
 
         mock_model = MagicMock()
         mock_model.get_layers = MagicMock(return_value=[mock_layer])
+        mock_model._get_attn_o_proj = lambda layer: Model._get_attn_o_proj(
+            mock_model, layer
+        )
 
         matrices = Model.get_layer_matrices(mock_model, 0)
 
