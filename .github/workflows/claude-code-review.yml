@@ -12,11 +12,9 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Skip bot-authored PRs (dependabot, etc.) — they don't need AI code review
+    # and the action will fail with "non-human actor" if they trigger it.
+    if: github.actor != 'dependabot[bot]' && github.actor != 'github-actions[bot]'
 
     runs-on: ubuntu-latest
     permissions:
